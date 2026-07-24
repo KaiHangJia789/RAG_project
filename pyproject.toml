@@ -1,0 +1,16 @@
+[project]
+name = "rag-project"
+version = "0.1.0"
+description = "RAG项目 — AI应用工程师学习计划 Week4 FastAPI基础"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"
+
+[tool.uvicorn]
+host = "127.0.0.1"
+port = 8000
+reload = true
