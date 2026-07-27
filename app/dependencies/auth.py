@@ -1,62 +1,70 @@
 """
 依赖注入模块
-演示 FastAPI Depends 的用法：鉴权、分页参数、服务实例获取
+提供 FastAPI Depends 依赖：DB、Redis、Service、鉴权
 """
 from typing import Annotated
 from fastapi import Depends, Header, HTTPException, Query
 
 from app.config import settings
 from app.models.requests import PaginationParams
+
+# ── 全局单例（由 main.py lifespan 初始化后赋值） ──
+from app.db.connection import Database
+from app.cache.connection import RedisClient
+from app.cache.document_cache import DocumentCache
 from app.services.document_service import DocumentService
 from app.services.storage_service import StorageService
 
-# ─── 单例服务实例 ──────────────────────────────────────────────
-# 模块级别的单例，保证整个应用生命周期内只有一个实例
-_storage_instance: StorageService | None = None
-_document_service_instance: DocumentService | None = None
+_db: Database | None = None
+_redis_client: RedisClient | None = None
+_doc_cache: DocumentCache | None = None
+_doc_service: DocumentService | None = None
 
 
-def get_storage_service() -> StorageService:
-    """获取 StorageService 单例"""
-    global _storage_instance
-    if _storage_instance is None:
-        _storage_instance = StorageService()
-    return _storage_instance
+def init_services(db: Database, redis_client: RedisClient) -> None:
+    """在 app startup 时调用，初始化所有服务单例"""
+    global _db, _redis_client, _doc_cache, _doc_service
+    _db = db
+    _redis_client = redis_client
+    _doc_cache = DocumentCache(redis_client.client)
+
+    storage = StorageService()
+    _doc_service = DocumentService(
+        db=db,
+        cache=_doc_cache,
+        storage=storage,
+    )
+
+
+# ── 依赖获取函数 ──────────────────────────────────────────────
+
+def get_db() -> Database:
+    if _db is None:
+        raise RuntimeError("Database 未初始化（请检查 lifespan 配置）")
+    return _db
 
 
 def get_document_service() -> DocumentService:
-    """获取 DocumentService 单例（依赖 StorageService）"""
-    global _document_service_instance
-    if _document_service_instance is None:
-        _document_service_instance = DocumentService(get_storage_service())
-    return _document_service_instance
+    if _doc_service is None:
+        raise RuntimeError("DocumentService 未初始化（请检查 lifespan 配置）")
+    return _doc_service
 
 
-# ─── 类型别名（方便路由函数签名） ───────────────────────────────
+# ── 类型别名（方便路由函数签名） ───────────────────────────────
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 
 
-# ─── 鉴权依赖（演示用） ────────────────────────────────────────
+# ── 鉴权依赖（演示用 — Week5 只校验 Header 存在） ──────────────
 async def verify_api_key(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> str:
-    """
-    验证 API Key（简单演示版）
-    实际项目中应接入 JWT 或 OAuth2
-
-    Usage:
-        @router.get("/secure")
-        async def secure_endpoint(api_key: str = Depends(verify_api_key)):
-            ...
-    """
+    """验证 API Key（简单演示版）"""
     if x_api_key is None:
         raise HTTPException(status_code=401, detail="缺少 X-API-Key 请求头")
-    # 简单演示：只要提供了 key 就通过
-    # 生产环境应校验 key 的有效性（查数据库/Redis）
     return x_api_key
 
 
-# ─── 分页参数依赖 ──────────────────────────────────────────────
+# ── 分页参数依赖 ──────────────────────────────────────────────
 async def pagination_params(
     page: int = Query(default=1, ge=1, description="页码（从1开始）"),
     page_size: int = Query(

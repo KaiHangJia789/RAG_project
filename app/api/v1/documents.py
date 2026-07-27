@@ -48,7 +48,7 @@ async def list_documents(
         page=page,
         page_size=page_size,
     )
-    result = doc_service.search_documents(params)
+    result = await doc_service.search_documents(params)
     return APIResponse(
         code=200,
         message=f"共 {result.total} 条记录",
@@ -73,7 +73,7 @@ async def get_document(
     - 返回文档的元数据（文件名、类型、大小、状态、创建时间等）
     - 文档不存在时返回 404
     """
-    doc = doc_service.get_document(doc_id)
+    doc = await doc_service.get_document(doc_id)
     if doc is None:
         raise DocumentNotFoundError(doc_id)
     return APIResponse(
@@ -102,7 +102,7 @@ async def get_document_info(
 
     - **doc_id**: 上传文档时返回的唯一标识符
     """
-    info = doc_service.get_document_info(doc_id)
+    info = await doc_service.get_document_info(doc_id)
     if info is None:
         raise DocumentNotFoundError(doc_id)
     return APIResponse(
@@ -131,7 +131,7 @@ async def delete_document(
 
     - **doc_id**: 要删除的文档唯一标识符
     """
-    success = doc_service.delete_document(doc_id)
+    success = await doc_service.delete_document(doc_id)
     if not success:
         raise DocumentNotFoundError(doc_id)
     return APIResponse(

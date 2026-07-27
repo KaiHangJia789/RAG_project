@@ -15,7 +15,6 @@ class TestRootEndpoint:
         assert data["app"] == "RAG API"
         assert data["version"] == "0.1.0"
         assert "endpoints" in data
-        assert "docs" in data
         assert data["docs"] == "/docs"
 
 
@@ -29,8 +28,6 @@ class TestHealthCheck:
         data = response.json()
         assert data["code"] == 200
         assert data["data"]["status"] == "healthy"
-        assert data["data"]["app"] == "RAG API"
-        assert "timestamp" in data["data"]
 
     @pytest.mark.asyncio
     async def test_health_has_required_fields(self, async_client):
@@ -50,7 +47,6 @@ class TestReadinessCheck:
         assert response.status_code == 200
         data = response.json()
         assert data["data"]["ready"] is True
-        assert "checks" in data["data"]
 
     @pytest.mark.asyncio
     async def test_readiness_checks_structure(self, async_client):

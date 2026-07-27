@@ -6,6 +6,15 @@ uvicorn[standard]>=0.30.0,<1.0.0
 pydantic>=2.0.0,<3.0.0
 pydantic-settings>=2.0.0,<3.0.0
 
+# 文件上传
+python-multipart>=0.0.9
+
+# 数据库 (Week5)
+asyncpg>=0.29.0,<1.0.0
+
+# 缓存 (Week5)
+redis[hiredis]>=5.0.0,<6.0.0
+
 # 测试
 pytest>=8.0.0,<9.0.0
 pytest-asyncio>=0.24.0,<1.0.0
