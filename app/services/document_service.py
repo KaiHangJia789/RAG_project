@@ -27,7 +27,7 @@ logger = logging.getLogger("rag_api.service")
 
 
 # ── Week5 临时方案：硬编码默认用户（正式鉴权后再改） ──
-DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
+DEFAULT_USER_ID = "c67fbbb1-6882-480a-87df-fde06318b0fc"  # demo_user
 
 
 class DocumentService:

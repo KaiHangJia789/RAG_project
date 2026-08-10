@@ -13,17 +13,19 @@ from app.db.connection import Database
 from app.cache.connection import RedisClient
 from app.cache.document_cache import DocumentCache
 from app.services.document_service import DocumentService
+from app.services.parsing_service import ParsingService
 from app.services.storage_service import StorageService
 
 _db: Database | None = None
 _redis_client: RedisClient | None = None
 _doc_cache: DocumentCache | None = None
 _doc_service: DocumentService | None = None
+_parsing_service: ParsingService | None = None
 
 
 def init_services(db: Database, redis_client: RedisClient) -> None:
     """在 app startup 时调用，初始化所有服务单例"""
-    global _db, _redis_client, _doc_cache, _doc_service
+    global _db, _redis_client, _doc_cache, _doc_service, _parsing_service
     _db = db
     _redis_client = redis_client
     _doc_cache = DocumentCache(redis_client.client)
@@ -34,6 +36,7 @@ def init_services(db: Database, redis_client: RedisClient) -> None:
         cache=_doc_cache,
         storage=storage,
     )
+    _parsing_service = ParsingService(db=db)
 
 
 # ── 依赖获取函数 ──────────────────────────────────────────────
@@ -50,8 +53,15 @@ def get_document_service() -> DocumentService:
     return _doc_service
 
 
+def get_parsing_service() -> ParsingService:
+    if _parsing_service is None:
+        raise RuntimeError("ParsingService 未初始化（请检查 lifespan 配置）")
+    return _parsing_service
+
+
 # ── 类型别名（方便路由函数签名） ───────────────────────────────
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
+ParsingServiceDep = Annotated[ParsingService, Depends(get_parsing_service)]
 
 
 # ── 鉴权依赖（演示用 — Week5 只校验 Header 存在） ──────────────

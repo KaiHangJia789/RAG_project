@@ -394,6 +394,9 @@ async def async_client(fake_db, fake_redis, storage_service):
     from app.cache.document_cache import DocumentCache
     from app.db.repositories.document_repo import DocumentRepository
 
+    from app.services.parsing_service import ParsingService
+    from app.parsing.chunk_splitter import ChunkSplitter, ChunkingConfig
+
     # 注入测试替身
     auth._db = fake_db
     auth._redis_client = FakeRedisClientAdapter(fake_redis)
@@ -403,6 +406,10 @@ async def async_client(fake_db, fake_redis, storage_service):
         cache=auth._doc_cache,
         storage=storage_service,
         doc_repo=DocumentRepository(),
+    )
+    auth._parsing_service = ParsingService(
+        db=fake_db,
+        splitter=ChunkSplitter(ChunkingConfig(merge_short_threshold=0)),
     )
 
     transport = ASGITransport(app=app)

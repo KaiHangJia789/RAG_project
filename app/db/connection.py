@@ -41,6 +41,7 @@ class Database:
             min_size=2,
             max_size=10,
             command_timeout=30,
+            ssl=False,  # 云服务器 SSL=off，关闭 SSL 避免 WinError 121 超时
         )
         logger.info("PostgreSQL 连接池已建立 (min=2, max=10)")
 
