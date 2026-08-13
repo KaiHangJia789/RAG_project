@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAG 文档管理</title>
+  <style>
+    :root {
+      --bg: #f7f7f8;
+      --card: #ffffff;
+      --border: #e5e5e7;
+      --primary: #2563eb;
+      --text: #1f2937;
+      --muted: #6b7280;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 24px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 8px; }
+    .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 0.9rem; }
+
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      background: var(--card);
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      margin-bottom: 16px;
+    }
+    .drop-zone.dragover {
+      border-color: var(--primary);
+      background: #eff6ff;
+    }
+    .drop-zone p { color: var(--muted); }
+    .drop-zone strong { color: var(--primary); }
+
+    .status {
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 0.9rem;
+      display: none;
+    }
+    .status.ok { background: #ecfdf5; color: #065f46; display: block; }
+    .status.err { background: #fef2f2; color: #991b1b; display: block; }
+
+    .doc-list { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .doc-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .doc-item:last-child { border-bottom: none; }
+    .doc-name { font-weight: 500; }
+    .doc-meta { color: var(--muted); font-size: 0.8rem; }
+    .badge {
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .badge.ready { background: #ecfdf5; color: #065f46; }
+    .badge.failed { background: #fef2f2; color: #991b1b; }
+    .badge.uploaded { background: #eff6ff; color: #1e40af; }
+
+    button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button:hover { opacity: 0.9; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <h1>📄 RAG 文档管理</h1>
+  <p class="subtitle">上传 PDF / Markdown / TXT 文档，自动解析入库</p>
+
+  <div class="drop-zone" id="dropZone">
+    <p>拖拽文件到此处，或 <strong>点击选择文件</strong></p>
+    <p style="font-size:0.8rem; margin-top:4px;">支持 PDF / MD / TXT / CSV / JSON，单文件 ≤ 50MB</p>
+    <input type="file" id="fileInput" style="display:none;">
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <div class="toolbar">
+    <h2 style="font-size:1.1rem;">文档列表</h2>
+    <button onclick="loadDocs()">刷新</button>
+  </div>
+  <div class="doc-list" id="docList">
+    <div class="doc-item"><span class="doc-meta">加载中...</span></div>
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const status = document.getElementById('status');
+    const docList = document.getElementById('docList');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) upload(fileInput.files[0]);
+    });
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) upload(e.dataTransfer.files[0]);
+    });
+
+    function showStatus(msg, ok) {
+      status.textContent = msg;
+      status.className = 'status ' + (ok ? 'ok' : 'err');
+    }
+
+    async function upload(file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      showStatus('上传中: ' + file.name + ' ...', true);
+      try {
+        const resp = await fetch('/api/v1/upload', { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (resp.ok) {
+          const s = data.data.status;
+          showStatus(`✅ 上传成功: ${data.data.filename} (状态: ${s})`, true);
+          loadDocs();
+        } else {
+          showStatus(`❌ 上传失败: ${data.message || data.detail}`, false);
+        }
+      } catch (e) {
+        showStatus('❌ 上传失败: ' + e.message, false);
+      }
+    }
+
+    async function loadDocs() {
+      try {
+        const resp = await fetch('/api/v1/documents?page=1&page_size=50');
+        const data = await resp.json();
+        const items = data.data.items || [];
+        if (!items.length) {
+          docList.innerHTML = '<div class="doc-item"><span class="doc-meta">暂无文档</span></div>';
+          return;
+        }
+        docList.innerHTML = items.map(d => `
+          <div class="doc-item">
+            <div>
+              <div class="doc-name">${escapeHtml(d.filename)}</div>
+              <div class="doc-meta">${d.file_type} · ${formatSize(d.file_size)}</div>
+            </div>
+            <span class="badge ${d.status}">${d.status}</span>
+          </div>
+        `).join('');
+      } catch (e) {
+        docList.innerHTML = '<div class="doc-item"><span class="doc-meta">加载失败</span></div>';
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    }
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+      return (bytes/1024/1024).toFixed(1) + ' MB';
+    }
+
+    loadDocs();
+  </script>
+</body>
+</html>

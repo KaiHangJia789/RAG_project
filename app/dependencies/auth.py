@@ -43,19 +43,20 @@ def init_services(db: Database, redis_client: RedisClient) -> None:
 
 def get_db() -> Database:
     if _db is None:
-        raise RuntimeError("Database 未初始化（请检查 lifespan 配置）")
+        raise HTTPException(status_code=503, detail="数据库未连接，请稍后重试")
     return _db
 
 
 def get_document_service() -> DocumentService:
     if _doc_service is None:
-        raise RuntimeError("DocumentService 未初始化（请检查 lifespan 配置）")
+        # DB 未就绪时优雅降级：返回 503 而非 500，前端能明确感知服务不可用
+        raise HTTPException(status_code=503, detail="数据库未连接，文档服务暂不可用")
     return _doc_service
 
 
 def get_parsing_service() -> ParsingService:
     if _parsing_service is None:
-        raise RuntimeError("ParsingService 未初始化（请检查 lifespan 配置）")
+        raise HTTPException(status_code=503, detail="数据库未连接，解析服务暂不可用")
     return _parsing_service
 
 

@@ -6,6 +6,13 @@ from pathlib import Path
 from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
+# 关键：把 .env 加载进 os.environ。
+# pydantic-settings 只把值读进 Settings 对象，不写 os.environ；
+# 但 langfuse / openai 等库读的是 os.environ，所以这里显式 load_dotenv。
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 
 class Settings(BaseSettings):
     """应用全局配置，自动从 .env 文件和环境变量加载"""
@@ -62,6 +69,20 @@ class Settings(BaseSettings):
     @property
     def REDIS_URL(self) -> str:
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    # --- LLM 提供者（OpenAI 兼容协议，换提供者只改配置不改代码） ---
+    LLM_PROVIDER: str = "deepseek"
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    DEEPSEEK_MODEL: str = "deepseek-v4-pro"
+    LLM_MAX_TOKENS: int = 16000          # V4 Pro 支持 384K 输出；思考模式消耗大，默认 16000
+    LLM_REASONING_EFFORT: str = "high"   # low / high / max
+    LLM_THINKING_ENABLED: bool = True    # 控制 extra_body 里 thinking.enabled
+
+    # --- 可观测性（LangFuse，提供者无关） ---
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
 
 
 settings = Settings()

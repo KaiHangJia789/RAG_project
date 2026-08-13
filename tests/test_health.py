@@ -5,11 +5,19 @@ import pytest
 
 
 class TestRootEndpoint:
-    """GET / — API根信息"""
+    """GET / — 前端上传页"""
 
     @pytest.mark.asyncio
-    async def test_root_returns_200(self, async_client):
+    async def test_root_returns_html(self, async_client):
         response = await async_client.get("/")
+        assert response.status_code == 200
+        assert "html" in response.headers.get("content-type", "").lower()
+        assert "RAG" in response.text
+
+    @pytest.mark.asyncio
+    async def test_api_info_returns_json(self, async_client):
+        """GET /api/info — API 信息（原根路由迁移到这里）"""
+        response = await async_client.get("/api/info")
         assert response.status_code == 200
         data = response.json()
         assert data["app"] == "RAG API"
