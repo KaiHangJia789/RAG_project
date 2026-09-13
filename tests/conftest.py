@@ -19,115 +19,154 @@ from app.services.storage_service import StorageService
 # ═══════════════════════════════════════════════════════════════
 
 class FakeConnection:
-    """模拟 asyncpg.Connection — 轻量但完整的 CRUD 实现"""
+    """
+    模拟 asyncpg.Connection — 轻量但完整的 CRUD 实现。
 
-    def __init__(self, store: dict[str, dict]):
+    store 按表名分桶：{table_name: {row_id: row}}，与真实 PostgreSQL 的分表
+    语义一致。（早先用单一扁平 dict，chunks 行会混进 documents 的列表查询结果。）
+    """
+
+    def __init__(self, store: dict[str, dict[str, dict]]):
         self._store = store
+
+    # ── SQL 解析辅助 ──
+
+    @staticmethod
+    def _table_of(sql: str) -> str | None:
+        """从 SQL 中提取目标表名"""
+        import re
+        for pattern in (
+            r'INSERT\s+INTO\s+"?(\w+)"?',
+            r'DELETE\s+FROM\s+"?(\w+)"?',
+            r'UPDATE\s+"?(\w+)"?',
+            r'\bFROM\s+"?(\w+)"?',
+        ):
+            m = re.search(pattern, sql, re.IGNORECASE)
+            if m:
+                return m.group(1)
+        return None
+
+    def _rows(self, table: str | None) -> dict[str, dict]:
+        """取某张表的行；无法定位表名时返回空表（不污染其他表）"""
+        if table is None:
+            return {}
+        return self._store.setdefault(table, {})
 
     async def fetchrow(self, query: str, *args):
         """模拟单行查询/插入/删除"""
+        import re
+        import uuid
+
         sql = query.strip()
+        upper = sql.upper()
+        rows = self._rows(self._table_of(sql))
 
         # INSERT ... RETURNING *
-        if sql.upper().startswith("INSERT"):
-            # 从 SQL 提取列名: INSERT INTO "table" ("col1","col2",...) VALUES ($1,$2,...) RETURNING *
-            import re, uuid
+        if upper.startswith("INSERT"):
+            # 从 SQL 提取列名: INSERT INTO "table" ("col1","col2",...) VALUES (...)
             cols_match = re.search(r'\(([^)]+)\)\s*VALUES', sql)
-            if cols_match:
-                cols = [c.strip().strip('"') for c in cols_match.group(1).split(",")]
-                row = dict(zip(cols, args))
-                if "id" not in row:
-                    row["id"] = str(uuid.uuid4())
-                self._store[row["id"]] = row
-                return self._Record(row)
-            return None
+            if not cols_match:
+                return None
+            cols = [c.strip().strip('"') for c in cols_match.group(1).split(",")]
+            row = dict(zip(cols, args))
+            row.setdefault("id", str(uuid.uuid4()))
+            rows[row["id"]] = row
+            return self._Record(row)
 
         # DELETE ... RETURNING id
-        if sql.upper().startswith("DELETE"):
+        if upper.startswith("DELETE"):
             row_id = str(args[-1])  # WHERE id = $N → 最后一个参数
-            if row_id in self._store:
-                del self._store[row_id]
+            if row_id in rows:
+                del rows[row_id]
                 return self._Record({"id": row_id})
             return None
 
         # UPDATE ... RETURNING *
-        if sql.upper().startswith("UPDATE"):
+        if upper.startswith("UPDATE"):
             row_id = str(args[-1])  # WHERE id = $N → 最后一个参数
-            if row_id in self._store:
-                # 解析 SET 子句: col = $1, col2 = $2
-                import re
-                set_match = re.search(r'SET\s+(.+?)\s+WHERE', sql, re.IGNORECASE)
-                if set_match:
-                    set_parts = [p.strip().split("=")[0].strip().strip('"') for p in set_match.group(1).split(",")]
-                    for i, col in enumerate(set_parts):
-                        self._store[row_id][col] = args[i]
-                self._store[row_id]["updated_at"] = row_id  # 至少更新一下
-                return self._Record(self._store[row_id])
-            return None
+            if row_id not in rows:
+                return None
+            # 解析 SET 子句: col = $1, col2 = $2
+            set_match = re.search(r'SET\s+(.+?)\s+WHERE', sql, re.IGNORECASE)
+            if set_match:
+                set_parts = [
+                    p.strip().split("=")[0].strip().strip('"')
+                    for p in set_match.group(1).split(",")
+                ]
+                for i, col in enumerate(set_parts):
+                    rows[row_id][col] = args[i]
+            return self._Record(rows[row_id])
 
         # SELECT ... (包括 COUNT)
-        if sql.upper().startswith("SELECT"):
+        if upper.startswith("SELECT"):
             # COUNT(*) → 支持 user_id 过滤
-            if "COUNT(*)" in sql.upper():
+            if "COUNT(*)" in upper:
                 user_id = str(args[0]) if args else None
                 if user_id:
-                    count = sum(1 for v in self._store.values() if v.get("user_id") == user_id)
+                    count = sum(1 for v in rows.values() if v.get("user_id") == user_id)
                 else:
-                    count = len(self._store)
+                    count = len(rows)
                 return self._Record({"count": count})
 
-            # SELECT * FROM ... WHERE id = $1
-            # 提取 WHERE id = 后面的参数
-            import re
-            where_match = re.search(r'WHERE\s+.+?\$(\d+)', sql)
+            # WHERE [table.]<col> = $N → 按该列精确匹配
+            # 覆盖 `WHERE id = $1`（按主键查）、`WHERE username = $1`（默认用户解析）
+            # 和 `WHERE "documents".user_id = $1`（带表名前缀）三种写法
+            where_match = re.search(
+                r'WHERE\s+(?:"?\w+"?\s*\.\s*)?(\w+)\s*=\s*\$(\d+)', sql
+            )
             if where_match:
-                param_idx = int(where_match.group(1)) - 1
-                if param_idx < len(args):
-                    row_id = str(args[param_idx])
-                    if row_id in self._store:
-                        return self._Record(self._store[row_id])
-            # SELECT * FROM ... WHERE user_id = $1 ...
+                col = where_match.group(1)
+                idx = int(where_match.group(2)) - 1
+                if idx >= len(args):
+                    return None
+                target = str(args[idx])
+                for row in rows.values():
+                    if str(row.get(col)) == target:
+                        return self._Record(row)
+                # 命中 WHERE 分支但没查到 → 就是没有，不再退化到其他匹配
+                return None
+
+            # 兜底：按 user_id 过滤
             if "user_id" in sql.lower() and args:
-                # 返回全部匹配用户ID的行（简化实现）
-                user_id = str(args[0])
-                rows = [v for v in self._store.values() if v.get("user_id") == user_id]
-                if rows:
-                    return self._Record(rows[0])
+                for row in rows.values():
+                    if row.get("user_id") == str(args[0]):
+                        return self._Record(row)
 
         return None
 
     async def fetch(self, query: str, *args):
         """模拟多行查询 — 支持 SELECT, 过滤, 排序, LIMIT"""
-        sql = query.upper()
+        import re
+
+        sql = query.strip()
+        upper = sql.upper()
+        rows = list(self._rows(self._table_of(sql)).values())
 
         # COUNT(*)
-        if "COUNT(*)" in sql:
+        if "COUNT(*)" in upper:
             user_id = str(args[0]) if args else None
             if user_id:
-                count = sum(1 for v in self._store.values() if v.get("user_id") == user_id)
+                count = sum(1 for v in rows if v.get("user_id") == user_id)
             else:
-                count = len(self._store)
+                count = len(rows)
             return [self._Record({"count": count})]
 
         # 通用 SELECT * 处理
-        if "SELECT" in sql and "FROM" in sql:
-            rows = list(self._store.values())
+        if "SELECT" in upper and "FROM" in upper:
+            # user_id = $N
+            user_filter = re.search(r'user_id\s*=\s*\$(\d+)', sql, re.IGNORECASE)
+            if user_filter:
+                idx = int(user_filter.group(1)) - 1
+                if idx < len(args):
+                    user_id = str(args[idx])
+                    rows = [r for r in rows if r.get("user_id") == user_id]
 
-            # 提取 WHERE 过滤条件
-            import re
-            # 匹配 user_id = $1
-            user_filter = re.search(r'user_id\s*=\s*\$1', sql)
-            if user_filter and args:
-                user_id = str(args[0])
-                rows = [r for r in rows if r.get("user_id") == user_id]
-
-            # 处理 LIMIT ($N 参数)
+            # LIMIT $N
             limit_match = re.search(r'LIMIT\s+\$(\d+)', sql, re.IGNORECASE)
             if limit_match:
-                param_idx = int(limit_match.group(1)) - 1
-                if param_idx < len(args):
-                    limit = int(args[param_idx])
-                    rows = rows[:limit]
+                idx = int(limit_match.group(1)) - 1
+                if idx < len(args):
+                    rows = rows[: int(args[idx])]
 
             return [self._Record(r) for r in rows]
 
@@ -188,36 +227,75 @@ class FakeConnection:
 class FakePool:
     """模拟 asyncpg.Pool"""
 
-    def __init__(self, store: dict[str, dict]):
-        self._store = store
+    def __init__(self, tables: dict[str, dict[str, dict]]):
+        self._tables = tables
 
     def acquire(self):
         class _Ctx:
-            def __init__(self, store):
-                self.conn = FakeConnection(store)
+            def __init__(self, tables):
+                self.conn = FakeConnection(tables)
             async def __aenter__(self):
                 return self.conn
             async def __aexit__(self, *args):
                 pass
-        return _Ctx(self._store)
+        return _Ctx(self._tables)
 
 
 class FakeDB:
-    """模拟 Database — 所有数据存内存 dict"""
+    """模拟 Database — 数据按表名分桶存内存 dict"""
 
     def __init__(self):
-        self.store: dict[str, dict] = {}
-        self.pool = FakePool(self.store)
+        # {table_name: {row_id: row}}
+        self.tables: dict[str, dict[str, dict]] = {
+            # users 表：DocumentService 按 username 解析 user_id
+            # （真实库里 UUID 由 seed.sql 的 gen_random_uuid() 生成，不能硬编码）
+            "users": {
+                "13ec9ba4-eb65-42b5-9653-9ebb2410709c": {
+                    "id": "13ec9ba4-eb65-42b5-9653-9ebb2410709c",
+                    "username": "demo_user",
+                    "email": "demo@example.com",
+                },
+                "e9019948-2042-46de-9b21-6d35e089dae0": {
+                    "id": "e9019948-2042-46de-9b21-6d35e089dae0",
+                    "username": "test_user",
+                    "email": "test@example.com",
+                },
+            },
+        }
+        self.pool = FakePool(self.tables)
+
+    # ── 测试断言辅助 ──
+
+    def table(self, name: str) -> dict[str, dict]:
+        """取某张表的行（不存在则建空表）"""
+        return self.tables.setdefault(name, {})
+
+    def user_id(self, username: str) -> str | None:
+        """按用户名查 user_id"""
+        for row in self.table("users").values():
+            if row.get("username") == username:
+                return row["id"]
+        return None
+
+    @property
+    def store(self) -> dict[str, dict]:
+        """documents 表的行（旧用例沿用）"""
+        return self.table("documents")
+
+    @property
+    def users(self) -> dict[str, dict]:
+        """users 表的行（旧用例沿用）"""
+        return self.table("users")
 
     async def connect(self, dsn): pass
     async def disconnect(self): pass
 
     async def fetch_one(self, query: str, *args):
-        conn = FakeConnection(self.store)
+        conn = FakeConnection(self.tables)
         return await conn.fetchrow(query, *args)
 
     async def fetch_all(self, query: str, *args):
-        conn = FakeConnection(self.store)
+        conn = FakeConnection(self.tables)
         return await conn.fetch(query, *args)
 
     async def execute(self, query: str, *args):
@@ -225,7 +303,7 @@ class FakeDB:
 
     @asynccontextmanager
     async def transaction(self):
-        conn = FakeConnection(self.store)
+        conn = FakeConnection(self.tables)
         yield conn
 
 

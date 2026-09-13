@@ -42,6 +42,26 @@ class FileValidationError(AppException):
         )
 
 
+class UserNotFoundError(AppException):
+    """
+    默认用户不存在异常。
+
+    典型场景：换库/重建库后没跑 seed.sql，users 表为空。
+    返回 503 而非 500，并给出可操作的修复指令 —— 而不是让外键约束
+    报一句 "documents_user_id_fkey 违反约束" 让人无从下手。
+    """
+
+    def __init__(self, username: str) -> None:
+        super().__init__(
+            message="服务未就绪",
+            code=503,
+            detail=(
+                f"默认用户 '{username}' 不存在于 users 表。"
+                f"请执行种子脚本初始化：psql -U <user> -d <db> -f app/db/migrations/seed.sql"
+            ),
+        )
+
+
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     """处理自定义应用异常"""
     return JSONResponse(

@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
 
+    # --- 认证（Week5 临时方案：正式鉴权前的默认用户）---
+    # 只存用户名不存 UUID：UUID 由 seed.sql 随机生成，写死会在换库/重建库后失效
+    DEFAULT_USERNAME: str = "demo_user"
+
     # --- PostgreSQL ---
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -83,6 +87,12 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+
+    # --- Embedding（Week9，阿里云百炼，OpenAI 兼容） ---
+    DASHSCOPE_API_KEY: str = ""
+    EMBEDDING_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    EMBEDDING_MODEL: str = "qwen3.7-text-embedding-flash"
+    EMBEDDING_DIM: int = 1024
 
 
 settings = Settings()

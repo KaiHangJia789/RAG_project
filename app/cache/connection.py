@@ -21,6 +21,7 @@ class RedisClient:
             url,
             encoding="utf-8",
             decode_responses=True,
+            protocol=2,  # RESP2：兼容 Redis 5+（RESP3 的 HELLO 命令 Redis 5 不支持）
         )
         # 验证连接
         await self.client.ping()

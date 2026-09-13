@@ -7,13 +7,15 @@
   - 所有读写经过 Cache-Aside 模式
   - 写操作走事务（db.transaction），读操作缓存优先
 """
+import asyncio
 import logging
 from datetime import datetime, UTC
 
 from app.cache.document_cache import CacheAction, DocumentCache
+from app.config import settings
 from app.db.connection import Database
 from app.db.repositories.document_repo import DocumentRepository
-from app.exceptions.handlers import DocumentNotFoundError
+from app.exceptions.handlers import DocumentNotFoundError, UserNotFoundError
 from app.models.document import (
     DocumentInfo,
     DocumentResponse,
@@ -24,10 +26,6 @@ from app.models.response import PaginatedData
 from app.services.storage_service import StorageService
 
 logger = logging.getLogger("rag_api.service")
-
-
-# ── Week5 临时方案：硬编码默认用户（正式鉴权后再改） ──
-DEFAULT_USER_ID = "c67fbbb1-6882-480a-87df-fde06318b0fc"  # demo_user
 
 
 class DocumentService:
@@ -48,11 +46,56 @@ class DocumentService:
         cache: DocumentCache,
         storage: StorageService,
         doc_repo: DocumentRepository | None = None,
+        default_username: str | None = None,
     ) -> None:
         self.db = db
         self.cache = cache
         self.storage = storage
         self.doc_repo = doc_repo or DocumentRepository()
+        self._default_username = default_username or settings.DEFAULT_USERNAME
+        # 解析结果缓存（user_id 在库的整个生命周期内不变）
+        self._default_user_id: str | None = None
+        self._user_id_lock = asyncio.Lock()
+
+    # ═══════════════════════════════════════════════════════════
+    # 默认用户解析
+    # ═══════════════════════════════════════════════════════════
+
+    async def _resolve_default_user_id(self) -> str:
+        """
+        按用户名查 users 表拿 user_id（带进程内缓存）。
+
+        为什么不把 UUID 写成常量：UUID 由 seed.sql 用 gen_random_uuid() 生成，
+        换库/重建库后会变成另一个值，硬编码必然失效并撞上 documents 的外键约束。
+        按 username 查是环境无关的。
+
+        Raises:
+            UserNotFoundError: users 表里没有这个用户名
+        """
+        if self._default_user_id is not None:
+            return self._default_user_id
+
+        # 双检锁：并发请求只让一个去查库，其余等结果
+        async with self._user_id_lock:
+            if self._default_user_id is not None:
+                return self._default_user_id
+
+            row = await self.db.fetch_one(  # type: ignore[union-attr]
+                "SELECT id FROM users WHERE username = $1", self._default_username
+            )
+            if row is None:
+                # 不缓存失败结果：补跑 seed.sql 后无需重启即可自愈
+                raise UserNotFoundError(self._default_username)
+
+            self._default_user_id = str(row["id"])
+            logger.info(
+                "默认用户已解析: %s → %s", self._default_username, self._default_user_id
+            )
+            return self._default_user_id
+
+    async def _user_id_or_default(self, user_id: str | None) -> str:
+        """显式传入则用传入值，否则解析默认用户"""
+        return user_id if user_id is not None else await self._resolve_default_user_id()
 
     # ═══════════════════════════════════════════════════════════
     # CREATE
@@ -62,32 +105,70 @@ class DocumentService:
         self,
         filename: str,
         content: bytes,
-        user_id: str = DEFAULT_USER_ID,
+        user_id: str | None = None,
     ) -> DocumentResponse:
-        """上传并创建文档（事务保证）"""
-        # 1. 文件校验
+        """
+        上传并创建文档（事务保证）。
+
+        顺序很重要：校验 → 解析 user_id → 写盘 → 入库。
+        纯计算的文件校验放最前（不浪费 DB 往返），写盘放在入库前一步，
+        任何前置失败都不会留下孤儿文件。
+        """
+        # 1. 文件校验（纯计算，先拦掉非法请求）
         self.storage.validate_file(filename, len(content))
 
-        # 2. 物理存储
+        # 2. 解析 user_id（users 表缺记录时在这里失败，此时还没写盘）
+        owner_id = await self._user_id_or_default(user_id)
+
+        # 3. 物理存储
         storage_result = await self.storage.save(filename, content)
 
-        # 3. 写入数据库（事务: documents 表，后续 Week9 扩展 chunks 表）
-        async with self.db.transaction() as conn:
-            record = await self.doc_repo.insert(
-                conn,
-                {
-                    "user_id": user_id,
-                    "filename": filename,
-                    "file_type": storage_result["file_type"],
-                    "file_size": storage_result["file_size"],
-                    "storage_path": storage_result["storage_path"],
-                    "status": "uploaded",
-                    "created_at": datetime.now(UTC),
-                    "updated_at": datetime.now(UTC),
-                },
-            )
+        # 4. 写入数据库（事务）；失败则回滚并删掉刚落盘的文件，避免孤儿文件堆积
+        try:
+            async with self.db.transaction() as conn:
+                record = await self.doc_repo.insert(
+                    conn,
+                    {
+                        "user_id": owner_id,
+                        "filename": filename,
+                        "file_type": storage_result["file_type"],
+                        "file_size": storage_result["file_size"],
+                        "storage_path": storage_result["storage_path"],
+                        "status": "uploaded",
+                        "created_at": datetime.now(UTC),
+                        "updated_at": datetime.now(UTC),
+                    },
+                )
+        except Exception:
+            try:
+                self.storage.delete(storage_result["storage_path"])
+            except OSError as cleanup_err:
+                logger.warning(
+                    "孤儿文件清理失败（需人工处理）: %s — %s",
+                    storage_result["storage_path"], cleanup_err,
+                )
+            raise
 
         return self._record_to_response(record)
+
+    # ═══════════════════════════════════════════════════════════
+    # UPDATE
+    # ═══════════════════════════════════════════════════════════
+
+    async def update_status(self, doc_id: str, status: DocumentStatus) -> None:
+        """
+        更新文档处理状态（落库 + 失效缓存）。
+
+        解析完成后必须调用，否则 DB 里状态永远停在 uploaded，
+        列表页/详情页看不到真实的解析结果。
+        """
+        async with self.db.transaction() as conn:
+            await self.doc_repo.update(
+                conn,
+                doc_id,
+                {"status": status.value, "updated_at": datetime.now(UTC)},
+            )
+        await self.cache.invalidate(doc_id)
 
     # ═══════════════════════════════════════════════════════════
     # READ（缓存优先）
@@ -146,7 +227,7 @@ class DocumentService:
     async def search_documents(
         self,
         params: DocumentSearchParams,
-        user_id: str = DEFAULT_USER_ID,
+        user_id: str | None = None,
     ) -> PaginatedData[DocumentResponse]:
         """
         文档列表查询（Keyset 游标分页）。
@@ -155,10 +236,12 @@ class DocumentService:
           - 过滤条件组合多变，缓存命中率极低
           - 数据更新频繁
         """
+        owner_id = await self._user_id_or_default(user_id)
+
         async with self.db.pool.acquire() as conn:  # type: ignore[union-attr]
             rows, has_more, next_cursor = await self.doc_repo.search_by_user(
                 conn,
-                user_id=user_id,
+                user_id=owner_id,
                 keyword=params.keyword,
                 status=params.status,
                 file_type=params.file_type,
@@ -168,7 +251,7 @@ class DocumentService:
 
         items = [self._record_to_response(r) for r in rows]
         total = await self.db.fetch_one(  # type: ignore[union-attr]
-            "SELECT COUNT(*) FROM documents WHERE user_id = $1", user_id
+            "SELECT COUNT(*) FROM documents WHERE user_id = $1", owner_id
         )
         total_count = total[0] if total else 0
 
@@ -188,12 +271,26 @@ class DocumentService:
         """
         删除文档记录 + 物理文件 + 缓存。
 
-        使用事务保证 DB 和缓存操作的一致性。
+        顺序：先在事务里读出 storage_path 并删记录，提交后再删磁盘文件。
+        必须先删 DB 再删文件 —— 反过来的话事务一旦回滚，就会留下
+        "记录还在、文件没了" 的坏数据（详情页能查到但文件读不出来）。
+        chunks 表有 ON DELETE CASCADE，会自动跟着删。
         """
         async with self.db.transaction() as conn:
-            deleted = await self.doc_repo.delete(conn, doc_id)
-            if not deleted:
+            row = await self.doc_repo.get_by_id(conn, doc_id)
+            if row is None:
                 return False
+            storage_path = dict(row)["storage_path"]
+            await self.doc_repo.delete(conn, doc_id)
+
+        # 事务已提交 —— 再删物理文件（漏这步就会不断堆积孤儿文件）
+        try:
+            self.storage.delete(storage_path)
+        except OSError as e:
+            # 记录已删，删除语义已达成；文件残留需告警人工处理
+            logger.warning(
+                "物理文件删除失败（遗留孤儿文件）: %s — %s", storage_path, e
+            )
 
         # 缓存失效（事务外，失败不影响 DB 一致性）
         await self.cache.invalidate(doc_id)

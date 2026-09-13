@@ -66,6 +66,8 @@ async def upload_document(
 
     # 4. 自动解析（PDF/MD/TXT 格式）
     ext = Path(file.filename).suffix.lower()
+    final_status = DocumentStatus.READY
+
     if ext in PARSEABLE_TYPES:
         logger.info("开始解析: %s (doc_id=%s)", file.filename, doc.id)
         try:
@@ -81,15 +83,21 @@ async def upload_document(
             if parsed.warnings:
                 for w in parsed.warnings:
                     logger.warning("  %s", w)
-
-            # 更新状态为 ready
-            doc.status = DocumentStatus.READY
         except Exception as e:
             logger.error("解析失败: %s (doc_id=%s): %s", file.filename, doc.id, e)
-            doc.status = DocumentStatus.FAILED
-    else:
-        # 非可解析格式（如 CSV/JSON）— 标记为 ready 不需要解析
-        doc.status = DocumentStatus.READY
+            final_status = DocumentStatus.FAILED
+
+    # 5. 状态落库（必须写回 DB，否则列表/详情页读到的永远是 uploaded）
+    if final_status != doc.status:
+        try:
+            await doc_service.update_status(doc.id, final_status)
+            doc.status = final_status
+        except Exception as e:
+            # 状态写回失败不该让整个上传请求失败——文件和 DB 记录都已就绪
+            logger.error(
+                "状态写回失败: doc_id=%s 目标状态=%s: %s（文档已上传，DB 中仍为 %s）",
+                doc.id, final_status.value, e, doc.status.value,
+            )
 
     return APIResponse(
         code=201,

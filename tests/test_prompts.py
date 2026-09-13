@@ -30,17 +30,40 @@ class TestPromptTemplate:
 
 
 class TestPromptRegistry:
-    def test_registry_has_at_least_5_prompts(self):
-        """验收要求：≥5 组 Prompt 对比"""
-        assert len(PROMPT_REGISTRY) >= 5
+    def test_registry_has_at_least_10_prompts(self):
+        """验收要求：Prompt 模板库 v1 ≥10 个场景"""
+        assert len(PROMPT_REGISTRY) >= 10
 
     def test_required_prompt_names(self):
-        required = ["baseline", "structured", "concise", "json_output", "chain_of_thought"]
+        required = [
+            "baseline", "structured", "concise", "json_output",
+            "chain_of_thought", "few_shot",
+            "query_rewrite", "rag_context", "refuse", "code_gen",
+        ]
         for name in required:
             assert name in PROMPT_REGISTRY, f"缺少 prompt: {name}"
 
     def test_all_prompts_renderable(self):
+        """每个模板都能用完整参数渲染"""
+        # 各模板所需的完整参数
+        full_args = {
+            "input": "测试输入",
+            "context": "上下文内容",
+            "language": "Python",
+        }
         for name, tpl in PROMPT_REGISTRY.items():
-            system, user = tpl.render(input="测试输入")
+            system, user = tpl.render(**full_args)
             assert isinstance(system, str)
-            assert "测试输入" in user
+            assert isinstance(user, str)
+            assert len(user) > 0
+
+    def test_query_rewrite_renders(self):
+        tpl = PROMPT_REGISTRY["query_rewrite"]
+        _, user = tpl.render(input="它的原理是什么")
+        assert "它的原理是什么" in user
+
+    def test_rag_context_renders(self):
+        tpl = PROMPT_REGISTRY["rag_context"]
+        system, user = tpl.render(context="资料", input="问题")
+        assert "资料" in user
+        assert "问题" in user

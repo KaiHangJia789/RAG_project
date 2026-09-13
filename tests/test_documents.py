@@ -3,6 +3,8 @@
 """
 import pytest
 
+from app.config import settings
+
 
 @pytest.fixture
 async def uploaded_doc(async_client):
@@ -91,6 +93,29 @@ class TestDeleteDocument:
         await async_client.delete(f"/api/v1/documents/{uploaded_doc}")
         response = await async_client.get(f"/api/v1/documents/{uploaded_doc}")
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_removes_physical_file(self, async_client):
+        """
+        删除文档必须同时删掉磁盘文件。
+
+        历史 bug：delete_document 只删了 DB 记录，docstring 里写的"删除物理文件"
+        从未实现 —— 这是 uploads/ 下孤儿文件不断堆积的第二个源头。
+        """
+        resp = await async_client.post(
+            "/api/v1/upload",
+            files={"file": ("to_delete.txt", b"delete me", "text/plain")},
+        )
+        assert resp.status_code == 201
+        doc_id = resp.json()["data"]["id"]
+        storage_path = resp.json()["data"]["storage_path"]
+
+        full_path = settings.UPLOAD_DIR.parent / storage_path
+        assert full_path.exists(), "上传后物理文件应存在"
+
+        response = await async_client.delete(f"/api/v1/documents/{doc_id}")
+        assert response.status_code == 200
+        assert not full_path.exists(), "删除记录后物理文件应一并删除"
 
 
 class TestSwaggerDocs:

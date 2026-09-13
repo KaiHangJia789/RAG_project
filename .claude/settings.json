@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/苏铭/Desktop/**)",
+      "WebSearch",
+      "Bash(curl -s -w \"\\\\n[HTTP_CODE:%{http_code}]\\\\n\" -X POST http://127.0.0.1:8000/api/v1/upload -F \"file=@/tmp/test_upload_cn.txt;filename=中文测试.txt\")",
+      "Bash(curl -sS -w \"\\\\n[HTTP_CODE:%{http_code}]\\\\n\" http://127.0.0.1:8000/api/info)",
+      "Bash(curl -sS -w \"\\\\n[HTTP_CODE:%{http_code}]\\\\n\" http://127.0.0.1:8000/health)"
+    ]
+  }
+}

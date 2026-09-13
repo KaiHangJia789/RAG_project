@@ -84,4 +84,53 @@ PROMPT_REGISTRY: dict[str, PromptTemplate] = {
         ),
         user_template="{input}",
     ),
+
+    "query_rewrite": PromptTemplate(
+        name="query_rewrite",
+        description="多轮改写：把口语化/含指代的问题改写为检索友好的独立 query",
+        system=(
+            "你是一个查询改写助手。把用户的原始问题改写成一个独立、完整、"
+            "适合向量检索的查询语句。要求：\n"
+            "1. 补全所有指代（如'它'、'这个'要替换成具体对象）\n"
+            "2. 保留核心语义和关键词\n"
+            "3. 只输出改写后的查询，不要解释"
+        ),
+        user_template="原始问题：{input}\n改写后的查询：",
+    ),
+
+    "rag_context": PromptTemplate(
+        name="rag_context",
+        description="检索增强：给定上下文生成答案",
+        system=(
+            "你是一个基于检索的问答助手。请仅根据下面提供的上下文回答问题。\n"
+            "要求：\n"
+            "1. 只使用上下文中的信息，不要编造\n"
+            "2. 如果上下文不足以回答，明确说'根据提供的资料无法回答'\n"
+            "3. 回答末尾标注引用的上下文编号（如 [1][2]）"
+        ),
+        user_template="上下文：\n{context}\n\n问题：{input}",
+    ),
+
+    "refuse": PromptTemplate(
+        name="refuse",
+        description="拒答：上下文中无答案时明确拒绝，不编造",
+        system=(
+            "你是一个严谨的问答助手。你的原则是：宁可说不知道，也不编造。\n"
+            "当且仅当你能基于可靠信息回答时，才给出答案；"
+            "否则明确说'我无法确定'并说明原因。"
+        ),
+        user_template="{input}",
+    ),
+
+    "code_gen": PromptTemplate(
+        name="code_gen",
+        description="代码生成：带语言和风格约束",
+        system=(
+            "你是一个严谨的软件工程师。写代码时遵循：\n"
+            "1. 只输出代码和必要注释，不解释废话\n"
+            "2. 代码风格干净、命名清晰、可运行\n"
+            "3. 考虑边界条件和错误处理"
+        ),
+        user_template="语言：{language}\n任务：{input}",
+    ),
 }
