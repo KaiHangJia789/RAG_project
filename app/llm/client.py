@@ -145,6 +145,8 @@ class LLMClient:
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
         thinking_enabled: bool | None = None,
+        temperature: float | None = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """
         单次生成。
@@ -156,6 +158,12 @@ class LLMClient:
             max_tokens: 覆盖默认值
             reasoning_effort: low / high / max
             thinking_enabled: 是否开启思考模式
+            temperature: 采样温度。**仅在 thinking_enabled=False 时传** ——
+                推理模型开启思考时采样参数会被忽略甚至报错，传了没意义还有风险。
+                判官调用应传 0.0 保证可复现。
+            json_mode: 要求返回 JSON 对象（response_format=json_object）。
+                **仅在 thinking_enabled=False 时用**；且 prompt 里必须出现字面量 "json"，
+                这是 DeepSeek json_object 模式的要求。
         """
         # 1. 组装消息
         messages: list[dict] = [{"role": "system", "content": system}]
@@ -169,6 +177,8 @@ class LLMClient:
             max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
             thinking_enabled=thinking_enabled,
+            temperature=temperature,
+            json_mode=json_mode,
         )
 
         # 3. 调用
@@ -190,6 +200,8 @@ class LLMClient:
         max_tokens: int | None,
         reasoning_effort: str | None,
         thinking_enabled: bool | None,
+        temperature: float | None = None,
+        json_mode: bool = False,
     ) -> dict:
         """组装 OpenAI 调用参数，正确处理 DeepSeek 思考模式"""
         params: dict[str, Any] = {
@@ -208,6 +220,13 @@ class LLMClient:
         params["extra_body"] = {
             "thinking": {"type": "enabled" if enabled else "disabled"}
         }
+
+        # 仅在显式传入时才加 —— 不用默认值填充，避免改变既有行为
+        # （现有测试断言 extra_body 精确相等，且未传这两个参数时不该出现）
+        if temperature is not None:
+            params["temperature"] = temperature
+        if json_mode:
+            params["response_format"] = {"type": "json_object"}
 
         return params
 

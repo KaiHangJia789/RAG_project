@@ -3,7 +3,7 @@ from app.parsing.chunking.base import Chunk, ChunkStrategy
 from app.parsing.chunking.fixed_size import FixedSizeChunker
 from app.parsing.chunking.paragraph import ParagraphChunker
 from app.parsing.chunking.sentence import SentenceChunker
-from app.parsing.chunking.registry import get_chunker, list_strategies
+from app.parsing.chunking.registry import build_chunker, get_chunker, list_strategies
 from app.parsing.chunking.comparator import ChunkComparator
 
 __all__ = [
@@ -13,6 +13,7 @@ __all__ = [
     "ParagraphChunker",
     "SentenceChunker",
     "ChunkComparator",
+    "build_chunker",
     "get_chunker",
     "list_strategies",
 ]

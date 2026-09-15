@@ -31,12 +31,69 @@ def langfuse_enabled() -> bool:
     )
 
 
+_client_cache: object | None = None
+
+
 def get_langfuse():
-    """懒加载 LangFuse 客户端（未配置时返回 None）"""
+    """
+    懒加载 LangFuse 客户端（未配置时返回 None）。
+
+    做进程内缓存：Langfuse() 每次构造都会新建 OpenTelemetry exporter 和后台线程，
+    在评估脚本里每题调一次会迅速耗尽资源。
+    """
+    global _client_cache
     if not langfuse_enabled():
         return None
-    from langfuse import Langfuse
-    return Langfuse()
+    if _client_cache is None:
+        from langfuse import Langfuse
+        _client_cache = Langfuse()
+    return _client_cache
+
+
+def _in_active_span() -> bool:
+    """
+    当前是否处于一个有效的 trace/span 上下文中。
+
+    先做这层检查再调 LangFuse 的 get_current_trace_id()：后者在没有活跃 span 时
+    会通过 OTel 打一条 "Context error: No active span" 的 ERROR 日志 ——
+    对"未包在 @observe 里的普通调用"来说这是预期情况，不该刷错误日志。
+    """
+    try:
+        from opentelemetry import trace as otel_trace
+        span = otel_trace.get_current_span()
+        return span is not None and span.get_span_context().is_valid
+    except Exception:
+        return False
+
+
+def current_trace_id() -> str | None:
+    """
+    取当前上下文的 trace id（供 API 返回给前端做"查看追踪"链接）。
+
+    @observe() 装饰的函数体内调用才会拿到值；未配置或不在 trace 上下文中返回 None。
+    """
+    client = get_langfuse()
+    if client is None or not _in_active_span():
+        return None
+    try:
+        return client.get_current_trace_id()
+    except Exception as e:
+        logger.debug("获取 trace_id 失败: %s", e)
+        return None
+
+
+def trace_url(trace_id: str | None = None) -> str | None:
+    """取 LangFuse Dashboard 上该 trace 的可点击链接"""
+    client = get_langfuse()
+    if client is None:
+        return None
+    if trace_id is None and not _in_active_span():
+        return None
+    try:
+        return client.get_trace_url(trace_id=trace_id)
+    except Exception as e:
+        logger.debug("获取 trace_url 失败: %s", e)
+        return None
 
 
 def flush() -> None:

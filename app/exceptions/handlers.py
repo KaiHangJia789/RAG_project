@@ -62,6 +62,36 @@ class UserNotFoundError(AppException):
         )
 
 
+class IndexNotReadyError(AppException):
+    """
+    向量索引未构建。
+
+    返回 503 并给出构建命令 —— 索引缺失是个"跑一条命令就能修"的问题，
+    不该让人对着"检索结果为空"猜半天。
+    """
+
+    def __init__(self, strategy: str | None = None) -> None:
+        cmd = "python scripts/build_index.py"
+        if strategy:
+            cmd += f" --strategy {strategy}"
+        super().__init__(
+            message="知识库未就绪",
+            code=503,
+            detail=f"向量索引尚未构建。请先执行：{cmd}",
+        )
+
+
+class ChunkNotFoundError(AppException):
+    """chunk 不存在（引用定位时）"""
+
+    def __init__(self, chunk_id: str, hint: str | None = None) -> None:
+        super().__init__(
+            message="文本块不存在",
+            code=404,
+            detail=f"ID 为 '{chunk_id}' 的文本块未找到" + (f"（{hint}）" if hint else ""),
+        )
+
+
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     """处理自定义应用异常"""
     return JSONResponse(

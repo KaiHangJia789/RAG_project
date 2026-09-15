@@ -49,15 +49,22 @@ class TestParsingService:
         assert result.total_blocks == 0
 
     @pytest.mark.asyncio
-    async def test_parse_and_persist(self, service):
+    async def test_parse_and_persist(self, service, fake_db):
         md = b"# Doc\n\n## Section\n\nContent here.\n\nMore content."
         parsed, chunk_ids = await service.parse_and_persist(
-            "test.md", md, "doc-test-001"
+            "test.md", md, "doc-test-001", chunk_strategy="sentence"
         )
         assert parsed.total_blocks >= 3
-        assert len(chunk_ids) >= 3
+        # 短文档被 ChunkingService 合并成 1 块 —— 这是「小文档就是一个 chunk」的
+        # 合理行为（Week10 统一切分路径后，不再像旧 ChunkSplitter 那样逐段输出）
+        assert len(chunk_ids) >= 1
         for cid in chunk_ids:
-            assert cid.startswith("doc-") or len(cid) > 0
+            assert len(cid) > 0
+        # 关键回归：chunk_strategy 标签必须与切分策略一致，
+        # 否则检索时会在错误的策略索引里找不到该文档
+        chunks = fake_db.table("chunks")
+        for cid in chunk_ids:
+            assert chunks[cid]["chunk_strategy"] == "sentence"
 
     @pytest.mark.asyncio
     async def test_parse_txt_and_persist(self, service):
@@ -66,6 +73,6 @@ class TestParsingService:
             "doc.txt", txt, "doc-test-002"
         )
         assert parsed.total_blocks == 3
-        assert len(chunk_ids) == 3
+        assert len(chunk_ids) >= 1
         for cid in chunk_ids:
             assert len(cid) > 0

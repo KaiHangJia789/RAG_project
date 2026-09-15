@@ -14,6 +14,9 @@ class Chunk:
     text: str
     start: int                                  # 在原文中的起始偏移
     end: int                                    # 在原文中的结束偏移（不含）
+    # 来源页码（Week10 新增）。默认 None 保证既有构造调用不变；
+    # 检索命中后要靠它做"引用可定位"，没有页码就只能定位到文档级。
+    page_number: int | None = None
 
     @property
     def length(self) -> int:

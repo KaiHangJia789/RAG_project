@@ -83,10 +83,20 @@ class ParsingService:
     # ═══════════════════════════════════════════════════════════
 
     async def parse_and_persist(
-        self, filename: str, content: bytes, document_id: str
+        self,
+        filename: str,
+        content: bytes,
+        document_id: str,
+        *,
+        chunk_strategy: str = "splitter",
     ) -> tuple[ParsedDocument, list[str]]:
         """
-        解析文件 → 切分长块 → 写入 chunks 表。
+        解析文件 → 按指定策略切分 → 写入 chunks 表。
+
+        Args:
+            chunk_strategy: 切分策略名（splitter/sentence/paragraph/fixed_size）。
+                **必须与写入的 chunk_strategy 标签一致** —— 否则检索时
+                会拿「A 策略切分」的结果冒充「B 策略」去匹配索引。
 
         Returns:
             (parsed_document, chunk_ids)
@@ -94,32 +104,36 @@ class ParsingService:
         # 1. 解析
         parsed = await self.parse(filename, content)
 
-        # 2. 切分长块
-        blocks = self.splitter.split(parsed.blocks)
+        # 2. 按策略切分（ChunkingService 统一了「splitter=ChunkSplitter」与
+        #    「三策略」的入口；splitter 策略内部就是 ChunkSplitter）
+        from app.services.chunking_service import ChunkingService
 
-        # 3. 写入 chunks 表（事务）
+        chunker = ChunkingService(chunk_strategy)
+        chunks = chunker.chunk_blocks(parsed.blocks)
+
+        # 3. 写入 chunks 表（事务），显式记录 chunk_strategy
         chunk_ids: list[str] = []
         async with self.db.transaction() as conn:
-            for block in blocks:
-                tbl = '"chunks"'
-                clean_text = self._sanitize_text(block.text)
-                chunk = await conn.fetchrow(
-                    f"INSERT INTO {tbl} "
-                    f"(document_id, chunk_index, chunk_text, chunk_hash, "
-                    f"token_count, page_number) "
-                    f"VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+            for i, chunk in enumerate(chunks):
+                clean_text = self._sanitize_text(chunk.text)
+                row = await conn.fetchrow(
+                    'INSERT INTO "chunks" '
+                    '(document_id, chunk_strategy, chunk_index, chunk_text, '
+                    'chunk_hash, token_count, page_number) '
+                    'VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
                     document_id,
-                    block.position,
+                    chunk_strategy,
+                    i,
                     clean_text,
                     self._hash_text(clean_text),
                     self._estimate_tokens(clean_text),
-                    block.page_number,
+                    chunk.page_number,
                 )
-                chunk_ids.append(str(chunk["id"]))
+                chunk_ids.append(str(row["id"]))
 
         logger.info(
-            "persisted '%s': %d blocks → %d chunks",
-            filename, parsed.total_blocks, len(chunk_ids),
+            "persisted '%s' (%s): %d blocks → %d chunks",
+            filename, chunk_strategy, parsed.total_blocks, len(chunk_ids),
         )
         return parsed, chunk_ids
 

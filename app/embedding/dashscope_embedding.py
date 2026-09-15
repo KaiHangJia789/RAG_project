@@ -22,12 +22,15 @@ logger = logging.getLogger("rag_api.embedding")
 class DashscopeEmbeddingClient(EmbeddingClient):
     """阿里云百炼 Embedding 客户端"""
 
-    def __init__(self, batch_size: int = 50, max_retries: int = 3):
+    def __init__(self, batch_size: int | None = None, max_retries: int = 3):
         """
         Args:
-            batch_size: 单次 API 调用的最大文本条数（限流）
+            batch_size: 单次 API 调用的最大文本条数。默认取
+                settings.EMBEDDING_BATCH_SIZE（百炼硬上限 25 条，超了
+                直接 400 InvalidParameter 而非限流，重试也无用）
             max_retries: 网络失败最大重试次数
         """
+        batch_size = batch_size if batch_size is not None else settings.EMBEDDING_BATCH_SIZE
         if batch_size <= 0:
             raise ValueError(f"batch_size 必须 > 0，实际 {batch_size}")
         self.batch_size = batch_size
@@ -80,7 +83,13 @@ class DashscopeEmbeddingClient(EmbeddingClient):
     # ── 内部实现 ──
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """单批向量化（带重试；维度校验错误直接冒泡，不重试）"""
+        """
+        单批向量化（带指数退避重试）。
+
+        退避用 1s → 2s → 4s 而非固定 1 秒：实测网络抖动经常持续数秒，
+        固定间隔重试三次全部撞在同一个故障窗口里，等于没有重试。
+        维度校验错误直接冒泡（配置问题，重试无意义）。
+        """
         last_err: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -91,11 +100,12 @@ class DashscopeEmbeddingClient(EmbeddingClient):
             except Exception as e:
                 last_err = e
                 if attempt < self.max_retries:
+                    delay = 2 ** (attempt - 1)      # 1s, 2s, 4s ...
                     logger.warning(
-                        "embedding 调用失败（第 %d/%d 次）: %s，1 秒后重试",
-                        attempt, self.max_retries, e,
+                        "embedding 调用失败（第 %d/%d 次）: %s，%d 秒后重试",
+                        attempt, self.max_retries, e, delay,
                     )
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(delay)
         raise RuntimeError(f"embedding 调用最终失败: {last_err}")
 
     async def _call_api(self, texts: list[str]) -> list[list[float]]:

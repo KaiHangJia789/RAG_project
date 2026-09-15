@@ -58,6 +58,27 @@ async def _connect_with_retry(connect_fn, name: str, attempts: int = 3, timeout:
     return False
 
 
+def _log_index_status() -> None:
+    """把索引状态打进启动日志 —— 没建索引时一眼可见，不用等到提问才发现"""
+    from app.dependencies import auth
+
+    svc = auth._index_service
+    if svc is None:
+        return
+    stats = svc.stats()
+    if stats["vectors"]:
+        logger.info(
+            "   向量索引:   策略=%s, %d 条向量 / %d 个文档（%s）",
+            stats["strategy"], stats["vectors"], stats["documents"], stats["index_path"],
+        )
+    else:
+        logger.warning(
+            "   向量索引:   ⚠️ 空索引（策略=%s）。问答功能不可用，"
+            "请执行: python scripts/build_index.py --strategy %s",
+            stats["strategy"], stats["strategy"],
+        )
+
+
 # ─── 生命周期管理 ──────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -87,6 +108,7 @@ async def lifespan(app: FastAPI):
     if db_ready:
         init_services(db, redis_client)
         logger.info("   服务单例:   已初始化（DocumentService + ParsingService + 解析器）")
+        _log_index_status()
     else:
         logger.warning("⚠️ DB 未就绪，跳过 DocumentService/ParsingService 初始化")
 

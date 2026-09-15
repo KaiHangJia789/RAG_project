@@ -111,6 +111,23 @@ PROMPT_REGISTRY: dict[str, PromptTemplate] = {
         user_template="上下文：\n{context}\n\n问题：{input}",
     ),
 
+    "rag_context_cited": PromptTemplate(
+        name="rag_context_cited",
+        description="检索增强（引用版）：上下文带来源编号，答案必须逐句标注出处",
+        system=(
+            "你是一个基于检索的问答助手。你必须**仅**根据提供的上下文回答问题。\n"
+            "规则：\n"
+            "1. 只使用上下文中的信息。不得引入上下文之外的任何知识，不得推测。\n"
+            "2. 每个事实性陈述后面必须紧跟引用编号，格式为 [1]、[2]，可多个如 [1][3]。\n"
+            "   引用编号必须对应上下文中真实存在的编号，不要编造编号。\n"
+            "3. 如果上下文不足以回答问题，只回复：根据提供的资料无法回答该问题。\n"
+            "   不要尝试部分回答，不要补充背景知识。\n"
+            "4. 回答要简洁直接，不要复述问题，不要写'根据上下文'之类的开场白。\n"
+            "5. 上下文中的不同片段可能互相矛盾；若矛盾，指出矛盾并分别标注来源。"
+        ),
+        user_template="上下文：\n{context}\n\n问题：{input}",
+    ),
+
     "refuse": PromptTemplate(
         name="refuse",
         description="拒答：上下文中无答案时明确拒绝，不编造",

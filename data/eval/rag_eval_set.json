@@ -1,0 +1,558 @@
+{
+  "version": "v1",
+  "created": "2026-09-14",
+  "description": "RAG 结构化评测集 v1 — 问题 / 标准答案 / 参考来源 三列。含 40 道正样本 + 10 道负样本（语料中无答案，考察拒答能力）。",
+  "corpus_dir": "data/corpus",
+  "items": [
+    {
+      "id": "q001",
+      "question": "RAG 是什么？它解决了大语言模型的哪些固有限制？",
+      "ground_truth": "RAG 是检索增强生成，在生成答案前先从外部知识库检索相关文档片段作为上下文。它缓解三个限制：知识截止（模型训练后产生的新知识无法获知）、无法溯源（答案没有出处）、幻觉（编造看似合理但错误的内容）。",
+      "reference_sources": [{"document": "01_rag_basics.md", "section": "什么是 RAG"}],
+      "answerable": true,
+      "topic": "rag",
+      "difficulty": "easy"
+    },
+    {
+      "id": "q002",
+      "question": "生产级 RAG 系统包含哪五个阶段？",
+      "ground_truth": "五个阶段：文档解析、文本切分、向量化、检索、生成。",
+      "reference_sources": [{"document": "01_rag_basics.md", "section": "完整链路的五个阶段"}],
+      "answerable": true,
+      "topic": "rag",
+      "difficulty": "easy"
+    },
+    {
+      "id": "q003",
+      "question": "微调和 RAG 各自适合什么场景？",
+      "ground_truth": "微调把知识写进模型参数，适合调整风格和格式，成本高、更新慢、无法溯源。RAG 把知识放在外部，适合事实性问答，更新即时、可溯源、成本低。实践中常结合：微调对齐输出格式，RAG 提供事实依据。",
+      "reference_sources": [{"document": "01_rag_basics.md", "section": "为什么不用微调"}],
+      "answerable": true,
+      "topic": "rag",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q004",
+      "question": "Context Precision 是怎么计算的？相关性序列为 [1,0,1,0,0] 时结果是多少？",
+      "ground_truth": "采用 rank-weighted average precision：precision@k 乘以该位置是否相关，求和后除以相关文档总数。序列 [1,0,1,0,0] 时，位置1精确率1，位置3精确率2/3≈0.667，分子=1×1+0+1×0.667=1.667，分母为2，结果是0.833。",
+      "reference_sources": [{"document": "01_rag_basics.md", "section": "检索质量的三个关键指标"}],
+      "answerable": true,
+      "topic": "rag",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q005",
+      "question": "什么是「lost in the middle」现象？如何应对？",
+      "ground_truth": "当上下文中相关信息位于中间位置时，模型的利用率显著低于位于开头或结尾时。应对方法是最相关的片段放在上下文最前面。",
+      "reference_sources": [{"document": "01_rag_basics.md", "section": "什么情况下 RAG 会失败"}],
+      "answerable": true,
+      "topic": "rag",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q006",
+      "question": "为什么拒答判断要放在生成之前而不是指望模型自己说不知道？",
+      "ground_truth": "放在生成之前有两个好处：响应快（毫秒级而非数秒级），成本低（省掉一次昂贵的模型调用）。具体做法是设置相似度阈值，最高相似度低于阈值时直接拒答。",
+      "reference_sources": [{"document": "01_rag_basics.md", "section": "拒答机制的设计"}],
+      "answerable": true,
+      "topic": "rag",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q007",
+      "question": "相似度阈值应该怎么确定？为什么不能拍脑袋？",
+      "ground_truth": "不同嵌入模型的余弦相似度分布差异很大，同一阈值在 A 模型上过滤 10% 噪声，在 B 模型上可能过滤 90% 有效结果。正确做法是先用标注数据画出可回答问题与不可回答问题的相似度分布，取两条分布之间的谷底作为阈值。",
+      "reference_sources": [{"document": "01_rag_basics.md", "section": "拒答机制的设计"}],
+      "answerable": true,
+      "topic": "rag",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q008",
+      "question": "Embedding 是什么？为什么它比关键词检索更适合处理同义表述？",
+      "ground_truth": "Embedding 是把离散符号映射到连续向量空间的技术，语义相近的文本在向量空间中距离也相近。关键词检索要求问题和文档包含相同的词，而向量检索不要求，所以「怎样入门写代码」和「如何学习编程」虽然没有共同关键词，向量却很接近。",
+      "reference_sources": [{"document": "02_embedding_vector.md", "section": "嵌入向量的本质"}],
+      "answerable": true,
+      "topic": "embedding",
+      "difficulty": "easy"
+    },
+    {
+      "id": "q009",
+      "question": "余弦相似度和内积是什么关系？这对工程实现有什么价值？",
+      "ground_truth": "当两个向量都已做 L2 归一化时，内积恒等于余弦相似度。工程价值在于：FAISS 等索引库对内积检索的速度远快于直接算余弦，所以标准做法是入库和查询时都对向量做 L2 归一化，然后用内积索引，数学结果与余弦相似度完全一致。",
+      "reference_sources": [{"document": "02_embedding_vector.md", "section": "相似度度量"}],
+      "answerable": true,
+      "topic": "embedding",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q010",
+      "question": "FAISS 有哪几种索引类型？各自适用什么数据规模？",
+      "ground_truth": "IndexFlatIP/IndexFlatL2 是暴力检索，精确但线性增长，十万条以内适用；IndexIVFFlat 是倒排索引，十万到千万适用；IndexIVFPQ 加乘积量化压缩，内存受限时用；IndexHNSWFlat 基于图，查询极快但内存占用高。",
+      "reference_sources": [{"document": "02_embedding_vector.md", "section": "FAISS 索引类型"}],
+      "answerable": true,
+      "topic": "embedding",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q011",
+      "question": "FAISS 的 add_with_ids 对重复 id 会怎么处理？这个行为有什么风险？",
+      "ground_truth": "不会报错，只是追加一条新记录。风险是索引中存在两条不同向量共享同一个 id，检索时返回重复 id 挤占结果名额，且回查元数据永远只命中文档 A。写入前必须自己检查 id 是否已存在。",
+      "reference_sources": [{"document": "02_embedding_vector.md", "section": "归一化实践"}],
+      "answerable": true,
+      "topic": "embedding",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q012",
+      "question": "pgvector 和 FAISS 各自的优缺点是什么？",
+      "ground_truth": "pgvector 是 PostgreSQL 扩展，优势是能在同一事务里操作向量和业务数据、支持 SQL 过滤、运维成本低；劣势是性能不如专用库。FAISS 是纯索引库，优势是性能极强、索引类型丰富；劣势是没有持久化语义（索引是进程内状态）、元数据要另维护、多进程无法共享。",
+      "reference_sources": [{"document": "02_embedding_vector.md", "section": "向量数据库 vs 专用索引库"}],
+      "answerable": true,
+      "topic": "embedding",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q013",
+      "question": "为什么维度校验是必要的防护？不校验会怎样？",
+      "ground_truth": "嵌入模型返回的向量维度如果与配置不符，FAISS 写入时不会报错（只要所有向量维度一致），但检索结果会完全错乱。所以每批返回后都应逐条检查维度，不匹配立即抛异常。换过嵌入模型后加载旧索引也应校验维度并提示删除重建。",
+      "reference_sources": [{"document": "02_embedding_vector.md", "section": "批量与限流"}],
+      "answerable": true,
+      "topic": "embedding",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q014",
+      "question": "为什么 FAISS 在 Windows 中文路径下写文件会失败？怎么绕开？",
+      "ground_truth": "FAISS 的 C++ 底层用 fopen 做文件 IO，在 Windows 中文路径下会失败。绕开方式是改用 Python 的 serialize_index 把索引序列化成字节，再用 Python 的文件对象写盘。",
+      "reference_sources": [{"document": "02_embedding_vector.md", "section": "常见坑"}],
+      "answerable": true,
+      "topic": "embedding",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q015",
+      "question": "为什么说切分直接决定了检索精度的上限？",
+      "ground_truth": "切分决定了检索的最小单元。块太大会稀释语义——2000 字的块里只有一句话相关，那句话的信号被淹没导致相似度不高；块太小则丢失上下文，指代前文的句子被单独切出后语义残缺。",
+      "reference_sources": [{"document": "03_chunking_parsing.md", "section": "为什么切分决定检索质量"}],
+      "answerable": true,
+      "topic": "chunking",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q016",
+      "question": "按段落切分为什么必须配合合并逻辑？不配合会怎样？",
+      "ground_truth": "段落长度不可控，一个长段落可能几千字，一个标题可能只有几个字。没有合并逻辑时最坏情况会产出大量平均 30 字左右的碎片，检索效果极差。正确做法是贪心累加相邻短段落，达到阈值才输出一块，同时设置上限防止合并过度。",
+      "reference_sources": [{"document": "03_chunking_parsing.md", "section": "三种基础切分策略"}],
+      "answerable": true,
+      "topic": "chunking",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q017",
+      "question": "为什么标题和代码块不应该被切分？",
+      "ground_truth": "标题通常很短，切了没有意义，而且标题是重要的结构信号，保持完整有助于理解上下文。代码被切断后无法执行也无法理解，如果代码超长宁可让它作为超长块存在也要保持完整。表格同理，语义依赖行列关系，切开后表头与数据分离价值归零。",
+      "reference_sources": [{"document": "03_chunking_parsing.md", "section": "按块类型区别对待"}],
+      "answerable": true,
+      "topic": "chunking",
+      "difficulty": "easy"
+    },
+    {
+      "id": "q018",
+      "question": "重叠（Overlap）的作用是什么？它的收益在哪种切分方式下最小？",
+      "ground_truth": "作用是防止语义被硬边界切断——如果完整概念横跨两个块，有重叠后至少一个块包含完整概念。代价是存储和计算成本增加，20% 重叠意味着向量数量增加约 25%。它只对固定大小切分这类机械边界有意义；按句子或段落切分时边界本身就在语义完整处，重叠收益很小，反而引入重复内容干扰检索。",
+      "reference_sources": [{"document": "03_chunking_parsing.md", "section": "重叠（Overlap）的作用与代价"}],
+      "answerable": true,
+      "topic": "chunking",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q019",
+      "question": "切分质量可以用哪些零成本指标度量？",
+      "ground_truth": "块数量与块长度分布（平均长度、最大长度、最小长度、标准差），以及碎片率——长度低于某个阈值（如 50 字）的块占总块数的比例。碎片率高意味着检索时会有大量低信息量候选干扰排名。这些指标不需要调用任何模型，成本为零。",
+      "reference_sources": [{"document": "03_chunking_parsing.md", "section": "切分质量如何度量"}],
+      "answerable": true,
+      "topic": "chunking",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q020",
+      "question": "扫描件 PDF 解析时有什么静默失败风险？应该怎么处理？",
+      "ground_truth": "扫描件 PDF 页面里没有文本层只有图片，文本提取返回空字符串但不报错。如果不做检查，会被当作「解析成功但内容为空」入库，之后用户提问永远检索不到却找不到原因。对策是显式分类页面类型（文本页/扫描页/混合页/空白页），对扫描页给出明确警告而不是静默跳过。",
+      "reference_sources": [{"document": "03_chunking_parsing.md", "section": "解析器的边界处理"}],
+      "answerable": true,
+      "topic": "chunking",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q021",
+      "question": "同一文档用不同切分策略重复入库时，唯一约束应该怎么设计？",
+      "ground_truth": "唯一约束必须包含策略维度，即 (文档ID, 策略名, 块序号)。如果只用 (文档ID, 块序号)，第二种策略的第一块（序号 0）会与第一种策略的第一块冲突。",
+      "reference_sources": [{"document": "03_chunking_parsing.md", "section": "常见失败模式"}],
+      "answerable": true,
+      "topic": "chunking",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q022",
+      "question": "FastAPI 的 lifespan 里为什么外部依赖连不上也不该让应用启动失败？",
+      "ground_truth": "为了排查效率。如果数据库故障导致应用直接退出，运维看到的是「服务挂了」；如果应用能启动并在日志里明确打出「数据库连接失败，文档服务不可用」，问题定位就是秒级的。同时应用还能提供不依赖数据库的接口如健康检查、静态页面。",
+      "reference_sources": [{"document": "04_fastapi_backend.md", "section": "应用生命周期管理"}],
+      "answerable": true,
+      "topic": "fastapi",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q023",
+      "question": "依赖注入的 getter 在服务未初始化时应该怎么处理？",
+      "ground_truth": "应该抛 HTTPException(503) 而不是让 None 传播下去。后者会在某个不确定的位置抛出 AttributeError 返回 500，让人以为是代码 bug 而非服务未就绪。",
+      "reference_sources": [{"document": "04_fastapi_backend.md", "section": "依赖注入的组织方式"}],
+      "answerable": true,
+      "topic": "fastapi",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q024",
+      "question": "新增自定义异常时为什么不需要修改 main.py？",
+      "ground_truth": "因为 Starlette 的异常处理器查找会沿类继承链向上匹配。只需注册基类 AppException 的处理器，一处注册就能覆盖所有子类。",
+      "reference_sources": [{"document": "04_fastapi_backend.md", "section": "异常处理体系"}],
+      "answerable": true,
+      "topic": "fastapi",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q025",
+      "question": "文件上传时为什么不能用用户提供的文件名作为磁盘路径？",
+      "ground_truth": "正确做法是生成 UUID 作为文件名，原始名只存数据库用于展示。这同时防御了路径穿越（如 ../../etc/passwd）和重名覆盖两个问题。",
+      "reference_sources": [{"document": "04_fastapi_backend.md", "section": "文件上传的最佳实践"}],
+      "answerable": true,
+      "topic": "fastapi",
+      "difficulty": "easy"
+    },
+    {
+      "id": "q026",
+      "question": "上传流程中先写文件还是先写数据库？为什么？",
+      "ground_truth": "先写文件再写数据库。如果数据库写入失败必须删除已落盘的文件，否则留下孤儿文件。反过来（先写库再写文件）更糟——事务回滚会留下「记录在但文件没了」的坏数据，详情页能查到但文件读不出来。",
+      "reference_sources": [{"document": "04_fastapi_backend.md", "section": "文件上传的最佳实践"}],
+      "answerable": true,
+      "topic": "fastapi",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q027",
+      "question": "SQL 解析型测试替身有什么隐蔽风险？怎么缓解？",
+      "ground_truth": "匹配失败时会静默返回错误结果。比如替身只识别 WHERE user_id = $1，遇到 WHERE document_id = $1 时不报错而是返回全表，这样写错的 SQL 在单元测试里会「通过」，问题只在生产环境暴露。缓解办法：给未识别的 SQL 模式加警告日志、对新增查询补显式断言、补充针对真实数据库的集成测试。",
+      "reference_sources": [{"document": "04_fastapi_backend.md", "section": "测试策略"}],
+      "answerable": true,
+      "topic": "fastapi",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q028",
+      "question": "为什么持有进程内可变状态的应用必须用单 worker 部署？",
+      "ground_truth": "uvicorn --workers N 会启动 N 个进程，各进程状态不一致且会互相覆盖持久化文件。内存索引、内存缓存这类状态必须外置到 Redis 等共享存储，或者用 --workers 1。",
+      "reference_sources": [{"document": "04_fastapi_backend.md", "section": "常见坑"}],
+      "answerable": true,
+      "topic": "fastapi",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q029",
+      "question": "连接池为什么能提升性能？池大小怎么定？",
+      "ground_truth": "建立一条数据库连接需要几十毫秒的 TCP 握手加认证，每个请求都新建连接的话高并发下数据库会先被连接开销压垮。连接池预先建立连接并复用。经验公式约为 CPU 核数 × 2 + 磁盘数，但实际应该从较小值开始（如 min=2, max=10）观察连接等待时间再调整。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "连接池管理"}],
+      "answerable": true,
+      "topic": "postgres",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q030",
+      "question": "Repository 层为什么要把连接作为参数接收而不是自己获取？",
+      "ground_truth": "这样同一个事务里的多个操作才能共享同一条连接。如果 Repository 自己从池里取连接，每个操作都在独立的事务里，跨表操作的原子性无从谈起。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "事务与原子性"}],
+      "answerable": true,
+      "topic": "postgres",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q031",
+      "question": "OFFSET 分页有什么缺陷？Keyset 分页怎么解决？代价是什么？",
+      "ground_truth": "OFFSET 分页必须扫描并丢弃前 N 行才能返回结果，页码越大越慢，深分页时响应时间线性增长。Keyset 分页用排序键作为游标，永远只扫描 page_size + 1 行，不随页码增长而变慢。代价是不支持跳页，用户只能「下一页」不能直接跳到第 5 页。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "分页方案的选择"}],
+      "answerable": true,
+      "topic": "postgres",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q032",
+      "question": "写缓存为什么是删除而不是更新？",
+      "ground_truth": "因为并发更新会乱序。两个请求先后更新数据库，但写缓存的顺序可能相反，导致缓存里是旧值。删除操作是幂等的，不存在这个问题。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "缓存模式"}],
+      "answerable": true,
+      "topic": "redis",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q033",
+      "question": "缓存穿透、雪崩、击穿分别是什么？各自怎么应对？",
+      "ground_truth": "穿透指查询不存在的数据导致缓存永不命中，对策是缓存空值并设置短过期时间。雪崩指大量缓存同时过期导致请求瞬间全部打到数据库，对策是给过期时间加随机抖动。击穿指某个热点键过期瞬间大量并发请求同时查库，对策是加互斥锁只让一个请求去查库并回写。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "缓存模式"}],
+      "answerable": true,
+      "topic": "redis",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q034",
+      "question": "为什么 Redis 实现的互斥锁必须设置过期时间？释放锁时要注意什么？",
+      "ground_truth": "不设过期时间的话，持锁进程崩溃后锁永远不释放，所有请求死等。释放锁时要先校验锁的值（应为唯一标识如 UUID）再删除，否则可能误删别人的锁——A 持锁超时释放，B 拿到锁，此时 A 的释放操作会删掉 B 的锁。校验和删除需要用 Lua 脚本保证原子性。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "互斥锁的正确实现"}],
+      "answerable": true,
+      "topic": "redis",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q035",
+      "question": "复合索引的列顺序为什么至关重要？举例说明。",
+      "ground_truth": "索引 (user_id, created_at) 能加速「某用户的文档按时间排序」，而 (created_at, user_id) 不能。因为 B-tree 索引只能高效利用最左前缀。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "索引设计"}],
+      "answerable": true,
+      "topic": "postgres",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q036",
+      "question": "数据库迁移脚本修改唯一约束时要注意什么？",
+      "ground_truth": "必须把 DROP 和 ADD 放在同一个事务里，否则中间态会出现「表没有唯一约束」的窗口，并发写入可能插入重复数据。另外修改已有列时顺序固定为：加列（可空）→ 回填数据 → 设默认值 → 设 NOT NULL。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "枚举类型与数据库迁移"}],
+      "answerable": true,
+      "topic": "postgres",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q037",
+      "question": "Faithfulness 指标是怎么计算的？判官返回的判定数少于断言数时怎么办？",
+      "ground_truth": "两步法：先把答案拆解为原子断言列表，再批量判断每条断言能否由上下文支持。得分等于被支持断言数除以断言总数。如果判官返回的判定数少于断言数，缺失的按「不支持」处理并标记该次判定格式异常。",
+      "reference_sources": [{"document": "06_llm_evaluation.md", "section": "四个核心指标的精确口径"}],
+      "answerable": true,
+      "topic": "evaluation",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q038",
+      "question": "幻觉率与 Faithfulness 有什么区别？为什么说它们是互补而非取反？",
+      "ground_truth": "幻觉率是答案级的二值指标：答案中存在至少一条无支撑断言即视为含幻觉。Faithfulness 是断言级的连续量。二者互补因为 Faithfulness 会被长答案稀释——20 条断言里有 1 条无支撑，Faithfulness 仍有 0.95，而幻觉率按答案计数会算作 100% 含幻觉。",
+      "reference_sources": [{"document": "06_llm_evaluation.md", "section": "四个核心指标的精确口径"}],
+      "answerable": true,
+      "topic": "evaluation",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q039",
+      "question": "有哪些零成本的确定性指标？调参时应该以哪个为主要信号？",
+      "ground_truth": "基于标注来源的检索指标：hit_rate@k、context_precision_by_source、MRR。以及引用有效性（解析 [n] 标记检查编号是否越界）。调参时应该以这些确定性指标为主要信号，把 LLM 判官的评分作为旁证。如果两者结论矛盾，说明要么判官不可靠要么标注有问题。",
+      "reference_sources": [{"document": "06_llm_evaluation.md", "section": "零成本的确定性指标"}],
+      "answerable": true,
+      "topic": "evaluation",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q040",
+      "question": "参数调优为什么要分阶段而不是做全网格搜索？",
+      "ground_truth": "5 个参数各取 3 个值就是 243 种组合，每种跑 50 道题成本不可承受。分三阶段：先固定其他参数单独扫 top_k 找召回饱和点；再在最优 top_k 下扫相似度阈值（画可答与不可答题的分布取谷底）；最后在最优组合下对比切分策略。",
+      "reference_sources": [{"document": "06_llm_evaluation.md", "section": "参数调优的方法论"}],
+      "answerable": true,
+      "topic": "evaluation",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q041",
+      "question": "评测集为什么必须包含负样本？比例建议是多少？",
+      "ground_truth": "负样本是语料中确实没有答案的问题，用于测试拒答能力。没有负样本就无法评估拒答机制，而拒答是 RAG 可信度的关键。比例建议在 15% 到 20%。",
+      "reference_sources": [{"document": "06_llm_evaluation.md", "section": "评估集的设计"}],
+      "answerable": true,
+      "topic": "evaluation",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q042",
+      "question": "为什么评测语料需要刻意设计干扰项？",
+      "ground_truth": "如果语料里每个主题只有一篇文档、彼此毫无关联，检索任务过于简单，任何策略都能得高分，对比实验没有区分度。应该加入大量「话题相邻但不含答案」的内容，才能真正测出排序质量。",
+      "reference_sources": [{"document": "06_llm_evaluation.md", "section": "评估集的设计"}],
+      "answerable": true,
+      "topic": "evaluation",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q043",
+      "question": "判官 prompt 设计有哪些关键原则？",
+      "ground_truth": "强制输出 JSON 便于程序化解析（配合 response_format 参数，注意 prompt 里必须出现字面量 json）；给出明确的反例——光说「判断是否相关」不够，必须写明边界情况如话题相关但没给出结论算不相关；批量判定而非逐条判定以控制调用量；解析前剥掉 markdown 围栏。",
+      "reference_sources": [{"document": "06_llm_evaluation.md", "section": "LLM-as-Judge 评估方法"}],
+      "answerable": true,
+      "topic": "evaluation",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q044",
+      "question": "推理模型多轮对话时 reasoning_content 为什么必须原样回传？",
+      "ground_truth": "否则 API 会返回 400 错误。实现要点是在把 assistant 消息转换回 API 格式时，只在 reasoning_content 非空时才写入该字段，避免给不支持的场景传空值。",
+      "reference_sources": [{"document": "06_llm_evaluation.md", "section": "推理模型的特殊处理"}],
+      "answerable": true,
+      "topic": "evaluation",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q045",
+      "question": "向量维度常见有哪些取值？维度越高越好吗？",
+      "ground_truth": "常见的中文嵌入模型维度有 768、1024、1536、2048 等。维度越高表达能力越强，但存储和计算成本也线性增长。",
+      "reference_sources": [{"document": "02_embedding_vector.md", "section": "嵌入向量的本质"}],
+      "answerable": true,
+      "topic": "embedding",
+      "difficulty": "easy"
+    },
+    {
+      "id": "q046",
+      "question": "在事务里调用外部 API 有什么问题？应该怎么安排顺序？",
+      "ground_truth": "会长时间持有连接和锁，高并发时迅速耗尽连接池。正确做法是先在事务外完成外部调用，再开启事务写库。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "事务与原子性"}],
+      "answerable": true,
+      "topic": "postgres",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q047",
+      "question": "GIN 索引配合 pg_trgm 解决什么问题？",
+      "ground_truth": "让 ILIKE '%关键词%' 这种前后都带通配符的模糊查询能走索引，否则只能全表扫描。",
+      "reference_sources": [{"document": "05_postgres_redis.md", "section": "索引设计"}],
+      "answerable": true,
+      "topic": "postgres",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q048",
+      "question": "两级切分是什么？为什么先按结构边界切再按标点切？",
+      "ground_truth": "先按段落或换行切分出结构单元，再在单元内部按句子切分并合并。纯按句号切分会把 Markdown 的 ## 标题和紧随其后的正文切开，标题变成孤立的短块。先按结构边界切能保住 Markdown 的结构，标题不会被切成两半。",
+      "reference_sources": [{"document": "03_chunking_parsing.md", "section": "三种基础切分策略"}],
+      "answerable": true,
+      "topic": "chunking",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q049",
+      "question": "推理模型开启思考模式时能传 temperature 吗？",
+      "ground_truth": "不能。推理模型开启思考时采样参数会被忽略甚至报错，所以传 temperature 前应该确认思考模式已关闭。另外对判官、分类、抽取这类任务，关掉思考模式比降低 temperature 对稳定性的贡献更大，而且能让调用快 5 到 10 倍。",
+      "reference_sources": [{"document": "06_llm_evaluation.md", "section": "推理模型的特殊处理"}],
+      "answerable": true,
+      "topic": "evaluation",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q050",
+      "question": "嵌入式 API 调用为什么需要分批？分批之外还需要什么防护？",
+      "ground_truth": "因为嵌入 API 通常有单次请求的文本条数上限，必须按固定大小切片逐批调用。分批之外还需要重试（网络抖动是常态），但要区分错误类型——维度不匹配这类配置错误重试没有意义，应该在重试逻辑之前就抛出去，否则会白白重试三次再失败，掩盖真正的问题。",
+      "reference_sources": [{"document": "02_embedding_vector.md", "section": "批量与限流"}],
+      "answerable": true,
+      "topic": "embedding",
+      "difficulty": "medium"
+    },
+    {
+      "id": "n001",
+      "question": "Kubernetes 的 Pod 调度策略有哪些？",
+      "ground_truth": "（不可回答）语料中不包含 Kubernetes 相关内容。正确行为是拒答。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "容器编排，与语料主题完全无关"
+    },
+    {
+      "id": "n002",
+      "question": "如何用 React 实现一个虚拟滚动列表？",
+      "ground_truth": "（不可回答）语料中不包含前端框架相关内容。正确行为是拒答。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "前端框架，语料只提到纯手写 HTML/JS"
+    },
+    {
+      "id": "n003",
+      "question": "训练一个 7B 参数的大模型需要多少张 A100 显卡？",
+      "ground_truth": "（不可回答）语料讨论的是 RAG 应用层，不涉及模型训练硬件。正确行为是拒答。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "话题相邻（都是大模型）但语料确实没讲训练硬件，考验拒答的边界判断"
+    },
+    {
+      "id": "n004",
+      "question": "MySQL 的 InnoDB 和 MyISAM 存储引擎有什么区别？",
+      "ground_truth": "（不可回答）语料只讲 PostgreSQL，不含 MySQL 内容。正确行为是拒答。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "话题相邻（都是数据库）但语料是 PostgreSQL，考验是否被「数据库」话题带偏"
+    },
+    {
+      "id": "n005",
+      "question": "2026 年诺贝尔物理学奖颁给了谁？",
+      "ground_truth": "（不可回答）语料中无任何时政或奖项信息。正确行为是拒答。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "时效性知识，考验知识截止边界的处理"
+    },
+    {
+      "id": "n006",
+      "question": "如何用 Rust 写一个高性能的 HTTP 服务器？",
+      "ground_truth": "（不可回答）语料中不包含 Rust 相关内容。正确行为是拒答。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "话题相邻（都是后端服务）但语料只讲 Python/FastAPI"
+    },
+    {
+      "id": "n007",
+      "question": "LangChain 的 AgentExecutor 内部是怎么实现的？",
+      "ground_truth": "（不可回答）语料中不包含 LangChain 相关内容。正确行为是拒答。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "话题高度相邻（都是 LLM 应用框架）但语料未涉及，是最容易被误答的负样本"
+    },
+    {
+      "id": "n008",
+      "question": "Transformer 的自注意力机制时间复杂度是多少？",
+      "ground_truth": "（不可回答）语料讨论 RAG 应用层，不涉及模型内部结构。正确行为是拒答。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "话题相邻（embedding 会提到向量）但语料没讲模型架构"
+    },
+    {
+      "id": "n009",
+      "question": "公司的年假制度是怎么规定的？",
+      "ground_truth": "（不可回答）语料中无任何公司制度信息。正确行为是拒答。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "完全无关的常识型问题"
+    },
+    {
+      "id": "n010",
+      "question": "这段代码里的 bug 在哪里？for i in range(len(lst)): lst.pop(i)",
+      "ground_truth": "（不可回答）语料中没有针对具体代码调试的内容。正确行为是拒答，或说明需要更多上下文。",
+      "reference_sources": [],
+      "answerable": false,
+      "topic": "negative",
+      "difficulty": "na",
+      "notes": "代码类问题，语料只讲工程原则不讲具体调试；考验是否会脱离上下文硬答"
+    }
+  ]
+}

@@ -2,17 +2,23 @@
 依赖注入模块
 提供 FastAPI Depends 依赖：DB、Redis、Service、鉴权
 """
+import logging
 from typing import Annotated
 from fastapi import Depends, Header, HTTPException, Query
 
 from app.config import settings
 from app.models.requests import PaginationParams
 
+logger = logging.getLogger("rag_api.deps")
+
 # ── 全局单例（由 main.py lifespan 初始化后赋值） ──
 from app.db.connection import Database
 from app.cache.connection import RedisClient
 from app.cache.document_cache import DocumentCache
+from app.embedding.dashscope_embedding import DashscopeEmbeddingClient
+from app.rag.pipeline import RagPipeline
 from app.services.document_service import DocumentService
+from app.services.index_service import IndexService
 from app.services.parsing_service import ParsingService
 from app.services.storage_service import StorageService
 
@@ -21,11 +27,20 @@ _redis_client: RedisClient | None = None
 _doc_cache: DocumentCache | None = None
 _doc_service: DocumentService | None = None
 _parsing_service: ParsingService | None = None
+_index_service: IndexService | None = None
+_rag_pipeline: RagPipeline | None = None
 
 
 def init_services(db: Database, redis_client: RedisClient) -> None:
-    """在 app startup 时调用，初始化所有服务单例"""
+    """
+    在 app startup 时调用，初始化所有服务单例。
+
+    索引加载失败不阻断启动（与"DB 未就绪也要能起服务"的既有策略一致）——
+    检索时会因 ready=False 而拒答，并提示构建命令。
+    """
     global _db, _redis_client, _doc_cache, _doc_service, _parsing_service
+    global _index_service, _rag_pipeline
+
     _db = db
     _redis_client = redis_client
     _doc_cache = DocumentCache(redis_client.client)
@@ -37,6 +52,17 @@ def init_services(db: Database, redis_client: RedisClient) -> None:
         storage=storage,
     )
     _parsing_service = ParsingService(db=db)
+
+    # ── 向量索引与 RAG 链路 ──
+    try:
+        _index_service = IndexService(DashscopeEmbeddingClient())
+        _index_service.load()
+    except Exception as e:
+        logger.warning("索引服务初始化失败（检索将不可用）: %s", e)
+        _index_service = IndexService()
+        _index_service.load()
+
+    _rag_pipeline = RagPipeline(index_service=_index_service)
 
 
 # ── 依赖获取函数 ──────────────────────────────────────────────
@@ -60,9 +86,24 @@ def get_parsing_service() -> ParsingService:
     return _parsing_service
 
 
+def get_index_service() -> IndexService:
+    if _index_service is None:
+        raise HTTPException(status_code=503, detail="向量索引服务暂不可用")
+    return _index_service
+
+
+def get_rag_pipeline() -> RagPipeline:
+    if _rag_pipeline is None:
+        raise HTTPException(status_code=503, detail="问答服务暂不可用")
+    return _rag_pipeline
+
+
 # ── 类型别名（方便路由函数签名） ───────────────────────────────
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 ParsingServiceDep = Annotated[ParsingService, Depends(get_parsing_service)]
+IndexServiceDep = Annotated[IndexService, Depends(get_index_service)]
+RagPipelineDep = Annotated[RagPipeline, Depends(get_rag_pipeline)]
+DbDep = Annotated[Database, Depends(get_db)]
 
 
 # ── 鉴权依赖（演示用 — Week5 只校验 Header 存在） ──────────────

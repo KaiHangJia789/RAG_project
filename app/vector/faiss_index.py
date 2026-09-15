@@ -124,8 +124,14 @@ class FaissIndex:
         logger.info("FAISS 索引已保存: %s（%d 条）", path, self._index.ntotal)
 
     @classmethod
-    def load(cls, path: str | Path, dim: int) -> "FaissIndex":
-        """从磁盘加载索引"""
+    def load(cls, path: str | Path, dim: int, *, strict: bool = True) -> "FaissIndex":
+        """
+        从磁盘加载索引。
+
+        Args:
+            strict: 维度不一致时是否抛异常。默认 True —— 维度不匹配时 FAISS 不会
+                报错，只会返回毫无意义的近邻结果，属于静默故障，必须早失败。
+        """
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"FAISS 索引文件不存在: {path}")
@@ -136,11 +142,42 @@ class FaissIndex:
         # bytes → numpy.uint8 数组（deserialize_index 期望 numpy 数组）
         arr = np.frombuffer(data, dtype=np.uint8)
         index._index = faiss.deserialize_index(arr)
+
         if index._index.d != dim:
-            logger.warning(
-                "索引文件维度(%d)与预期(%d)不一致", index._index.d, dim
+            msg = (
+                f"索引文件维度({index._index.d})与配置({dim})不一致。"
+                f"多半是 EMBEDDING_MODEL 换过 —— 需删除索引文件重建：{path}"
             )
+            if strict:
+                raise ValueError(msg)
+            logger.warning(msg)
         return index
+
+    # ── 删除 ──
+
+    def remove_ids(self, ids: list[int]) -> int:
+        """
+        按 id 删除向量，返回实际删除条数。
+
+        删除文档时调用。不删的话索引里会留下指向已删 chunk 的悬空向量，
+        检索命中后回表取不到文本。
+        """
+        if not ids:
+            return 0
+        before = self._index.ntotal
+        self._index.remove_ids(np.array(ids, dtype=np.int64))
+        return before - self._index.ntotal
+
+    def ids(self) -> list[int]:
+        """返回索引内全部 id（索引一致性自检用）"""
+        id_map = faiss.vector_to_array(self._index.id_map)
+        return [int(i) for i in id_map]
+
+    def has_id(self, faiss_id: int) -> bool:
+        """判断某 id 是否已在索引内（防重复 add 导致 top_k 名额被挤占）"""
+        if self._index.ntotal == 0:
+            return False
+        return bool(np.any(faiss.vector_to_array(self._index.id_map) == faiss_id))
 
     # ── 属性 ──
 

@@ -84,7 +84,62 @@
       font-size: 0.9rem;
     }
     button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
     .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+
+    /* ── 问答区 ── */
+    .section-title { font-size: 1.1rem; margin: 28px 0 12px; }
+    .qa-box { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .qa-input-row { display: flex; gap: 8px; align-items: flex-start; }
+    #questionInput {
+      flex: 1; padding: 10px 12px; border: 1px solid var(--border);
+      border-radius: 8px; font-family: inherit; font-size: 0.95rem;
+      resize: vertical; min-height: 46px;
+    }
+    #questionInput:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+
+    .qa-opts { display: flex; gap: 16px; align-items: center; margin-top: 10px; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
+    .qa-opts label { display: flex; align-items: center; gap: 4px; }
+    .qa-opts input[type=number] { width: 62px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; }
+
+    #answerBox { margin-top: 16px; display: none; }
+    .answer-text {
+      background: #f9fafb; border-left: 3px solid var(--primary);
+      padding: 12px 14px; border-radius: 0 8px 8px 0; white-space: pre-wrap;
+      font-size: 0.95rem;
+    }
+    .answer-text.refused { border-left-color: #f59e0b; background: #fffbeb; }
+
+    .cite-chip {
+      display: inline-block; background: var(--primary); color: #fff;
+      border-radius: 4px; padding: 0 5px; margin: 0 2px; font-size: 0.75rem;
+      cursor: pointer; vertical-align: super; text-decoration: none;
+      font-weight: 600;
+    }
+    .cite-chip:hover { opacity: 0.85; }
+
+    .answer-meta { margin-top: 8px; font-size: 0.78rem; color: var(--muted); }
+
+    .source-list { margin-top: 14px; }
+    .source-item {
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .source-item:hover { border-color: var(--primary); background: #f8fafc; }
+    .source-item.active { border-color: var(--primary); background: #eff6ff; }
+    .source-head { display: flex; justify-content: space-between; gap: 12px; font-size: 0.85rem; }
+    .source-name { font-weight: 500; }
+    .source-score { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+    .source-preview { color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+
+    .context-panel { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
+    .chunk-item {
+      padding: 8px 10px; margin-bottom: 6px; border-radius: 6px;
+      background: #f9fafb; font-size: 0.85rem; white-space: pre-wrap;
+    }
+    .chunk-item.target { background: #fef9c3; border-left: 3px solid #eab308; }
+    .chunk-label { font-size: 0.72rem; color: var(--muted); margin-bottom: 4px; }
   </style>
 </head>
 <body>
@@ -105,6 +160,32 @@
   </div>
   <div class="doc-list" id="docList">
     <div class="doc-item"><span class="doc-meta">加载中...</span></div>
+  </div>
+
+  <h2 class="section-title">💬 知识库问答</h2>
+  <div class="qa-box">
+    <div class="qa-input-row">
+      <textarea id="questionInput" placeholder="基于已上传的文档提问，例如：什么是 Keyset 分页？（Ctrl+Enter 提交）"></textarea>
+      <button id="askBtn" onclick="askQuestion()">提问</button>
+    </div>
+    <div class="qa-opts">
+      <label>上下文条数 <input type="number" id="finalK" value="5" min="1" max="20"></label>
+      <label>相似度阈值 <input type="number" id="minScore" value="0" min="0" max="1" step="0.05"></label>
+      <label>策略
+        <select id="strategySel" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;">
+          <option value="sentence">sentence</option>
+          <option value="paragraph">paragraph</option>
+          <option value="fixed_size">fixed_size</option>
+          <option value="splitter">splitter</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="answerBox">
+      <div class="answer-text" id="answerText"></div>
+      <div class="answer-meta" id="answerMeta"></div>
+      <div class="source-list" id="sourceList"></div>
+    </div>
   </div>
 
   <script>
@@ -183,6 +264,145 @@
       if (bytes < 1024) return bytes + ' B';
       if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
       return (bytes/1024/1024).toFixed(1) + ' MB';
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // 问答
+    // ══════════════════════════════════════════════════════════
+
+    const questionInput = document.getElementById('questionInput');
+    const askBtn = document.getElementById('askBtn');
+    const answerBox = document.getElementById('answerBox');
+    const answerText = document.getElementById('answerText');
+    const answerMeta = document.getElementById('answerMeta');
+    const sourceList = document.getElementById('sourceList');
+
+    questionInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) askQuestion();
+    });
+
+    async function askQuestion() {
+      const question = questionInput.value.trim();
+      if (!question) { showStatus('请输入问题', false); return; }
+
+      askBtn.disabled = true;
+      askBtn.textContent = '思考中...';
+      answerBox.style.display = 'block';
+      answerText.className = 'answer-text';
+      answerText.textContent = '检索并生成答案中，请稍候…';
+      answerMeta.textContent = '';
+      sourceList.innerHTML = '';
+
+      try {
+        const resp = await fetch('/api/v1/qa/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question,
+            strategy: document.getElementById('strategySel').value,
+            final_k: parseInt(document.getElementById('finalK').value) || 5,
+            min_score: parseFloat(document.getElementById('minScore').value) || 0,
+          }),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          answerText.className = 'answer-text refused';
+          answerText.textContent = '请求失败: ' + (data.message || data.detail || resp.status);
+          return;
+        }
+        renderAnswer(data.data);
+      } catch (e) {
+        answerText.className = 'answer-text refused';
+        answerText.textContent = '请求失败: ' + e.message;
+      } finally {
+        askBtn.disabled = false;
+        askBtn.textContent = '提问';
+      }
+    }
+
+    function renderAnswer(d) {
+      answerText.className = 'answer-text' + (d.refused ? ' refused' : '');
+      // 先用引用编号切分原文，**每段先转义**再拼 <a> 标签。
+      // 顺序不能反：先插标签再转义会把标签本身也转义掉，
+      // 而先转义再插标签才能保证模型输出里的 <script> 不会被执行。
+      const parts = String(d.answer || '').split(/(\[\d{1,3}\])/g);
+      answerText.innerHTML = parts.map(p => {
+        const m = p.match(/^\[(\d{1,3})\]$/);
+        if (!m) return escapeHtml(p);
+        const idx = parseInt(m[1], 10);
+        return `<a class="cite-chip" data-index="${idx}" title="点击定位原文">${idx}</a>`;
+      }).join('');
+
+      const bits = [];
+      if (d.refused) bits.push('⛔ 已拒答（' + (d.refusal_reason || '') + '）');
+      bits.push(`检索命中 ${d.retrieved_count} 条`);
+      if (d.max_score !== null && d.max_score !== undefined) bits.push(`最高相似度 ${Number(d.max_score).toFixed(3)}`);
+      bits.push(`耗时 ${Math.round(d.latency_ms)} ms`);
+      if (d.citation_validity < 1) bits.push(`⚠️ 引用有效率 ${(d.citation_validity*100).toFixed(0)}%`);
+      answerMeta.textContent = bits.join(' · ');
+
+      renderSources(d.citations || []);
+    }
+
+    function renderSources(citations) {
+      if (!citations.length) {
+        sourceList.innerHTML = '<div class="doc-meta">（本次回答未引用任何来源）</div>';
+        return;
+      }
+      sourceList.innerHTML = '<div class="doc-meta" style="margin-bottom:6px;">引用来源（点击展开原文）</div>' +
+        citations.map(c => `
+          <div class="source-item" data-chunk-id="${escapeHtml(c.chunk_id)}">
+            <div class="source-head">
+              <span class="source-name">[${c.index}] ${escapeHtml(c.filename)}${c.page_number ? ' · 第 ' + c.page_number + ' 页' : ''}</span>
+              <span class="source-score">相似度 ${Number(c.score).toFixed(3)}</span>
+            </div>
+            <div class="source-preview">${escapeHtml(String(c.text).slice(0, 120))}${c.text.length > 120 ? '…' : ''}</div>
+          </div>
+        `).join('');
+    }
+
+    // 事件委托：来源列表是动态重建的，不能逐个绑事件
+    sourceList.addEventListener('click', async (e) => {
+      const chip = e.target.closest('.cite-chip');
+      if (chip) {
+        // 点答案里的编号 → 滚动到对应来源卡片
+        const item = sourceList.querySelectorAll('.source-item')[parseInt(chip.dataset.index, 10) - 1];
+        if (item) { item.scrollIntoView({ behavior: 'smooth', block: 'center' }); item.click(); }
+        return;
+      }
+      const item = e.target.closest('.source-item');
+      if (item) await toggleSourceContext(item);
+    });
+
+    async function toggleSourceContext(item) {
+      const existing = item.querySelector('.context-panel');
+      if (existing) { existing.remove(); item.classList.remove('active'); return; }
+
+      item.classList.add('active');
+      const panel = document.createElement('div');
+      panel.className = 'context-panel';
+      panel.textContent = '加载原文中…';
+      item.appendChild(panel);
+
+      try {
+        const resp = await fetch(`/api/v1/qa/chunks/${item.dataset.chunkId}?before=1&after=1`);
+        const data = await resp.json();
+        if (!resp.ok) { panel.textContent = '加载失败: ' + (data.message || resp.status); return; }
+        renderChunkContext(panel, data.data);
+      } catch (e) {
+        panel.textContent = '加载失败: ' + e.message;
+      }
+    }
+
+    function renderChunkContext(panel, ctx) {
+      panel.innerHTML = `<div class="chunk-label">${escapeHtml(ctx.filename)} · 策略 ${escapeHtml(ctx.chunk_strategy)}</div>` +
+        (ctx.items || []).map(it => `
+          <div class="chunk-item ${it.is_target ? 'target' : ''}">
+            <div class="chunk-label">#${it.chunk_index}${it.page_number ? ' · 第 ' + it.page_number + ' 页' : ''}${it.is_target ? ' ← 被引用' : ''}</div>
+            ${escapeHtml(it.text)}
+          </div>
+        `).join('');
     }
 
     loadDocs();

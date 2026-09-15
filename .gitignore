@@ -53,3 +53,6 @@ logs/
 tmp/
 temp/
 *.tmp
+
+# Week10: FAISS 索引是二进制产物，不该入库（语料与评测集必须入库）
+data/index/

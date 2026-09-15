@@ -93,6 +93,32 @@ class Settings(BaseSettings):
     EMBEDDING_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     EMBEDDING_MODEL: str = "qwen3.7-text-embedding-flash"
     EMBEDDING_DIM: int = 1024
+    # 单次 API 调用的最大文本条数。百炼的批量上限会**动态变化**（实测同一模型
+    # 曾返回 25 条、后又返回 20 条的超限报错，疑似按负载/文本长度动态收紧）。
+    # 超限直接 400 InvalidParameter（不是限流，重试无用），因此取保守值 16。
+    EMBEDDING_BATCH_SIZE: int = 16
+
+    # --- 向量索引（Week10）---
+    # 每种 chunk 策略一个独立索引目录：data/index/{strategy}/
+    INDEX_DIR: Path = Path("data/index")
+    CHUNK_STRATEGY: str = "splitter"     # 线上生效的策略名
+    # 检索返回条数 → 阈值过滤 → 最终喂给 LLM 的条数
+    RAG_RETRIEVE_K: int = 20             # FAISS 单次取回条数（多个配置复用同一次检索）
+    RAG_FINAL_K: int = 5                 # 最终上下文条数
+    RAG_MIN_SCORE: float = 0.0           # 相似度阈值；0.0 = 不过滤（保证 demo 可跑通）
+
+    # --- 评估（Week10，LLM-as-Judge）---
+    EVAL_DIR: Path = Path("data/eval")
+    CORPUS_DIR: Path = Path("data/corpus")
+    # 判官调用参数：关思考 + 温度 0 —— 对推理模型而言关思考比降温度对稳定性的贡献大得多，
+    # 且让调用快 5-10 倍。judge 用低 effort 即可。
+    JUDGE_THINKING_ENABLED: bool = False
+    JUDGE_TEMPERATURE: float = 0.0
+    JUDGE_REASONING_EFFORT: str = "low"
+    JUDGE_MODEL: str = ""                # 空 = 复用 DEEPSEEK_MODEL
+    JUDGE_PROMPT_VERSION: str = "judge-v1"   # 换 prompt 必须改版本号（旧缓存与分数作废）
+    # 评测时的生成参数：同样关思考，否则 50 题 × N 配置会跑到天亮
+    EVAL_GEN_THINKING_ENABLED: bool = False
 
 
 settings = Settings()
