@@ -38,6 +38,9 @@ class LLMResponse(BaseModel):
     usage: LLMUsage = Field(default_factory=LLMUsage)
     latency_ms: float = 0.0
     reasoning_content: str | None = None   # ← DeepSeek 思考内容，多轮时必须原样回传
+    # 模型请求的工具调用（Week13）。有值时 finish_reason 通常是 "tool_calls"。
+    # 结构：[{"id": "call_xxx", "type": "function", "function": {"name": ..., "arguments": "<json 字符串>"}}]
+    tool_calls: list[dict] | None = None
 
 
 class ChatMessage(BaseModel):
@@ -67,6 +70,33 @@ class ChatMessage(BaseModel):
         if self.name is not None:
             d["name"] = self.name
         return d
+
+    # ── 工厂方法 ────────────────────────────────────────────
+
+    @classmethod
+    def from_response(cls, resp: "LLMResponse") -> "ChatMessage":
+        """
+        把 LLM 响应转成 assistant 消息（供下一轮回传）。
+
+        **必须用这个工厂构造，不要手写 dict。** DeepSeek 在带 tools 的请求里
+        要求 assistant 消息的 `reasoning_content` 原样回传（即使该轮没调工具），
+        手写 dict 时极易漏掉这个字段，导致 HTTP 400 且报错信息晦涩。
+
+        ⚠️ 注意：这与 langchain 的 `ChatDeepSeek` 是同一类 bug —— 它会丢掉
+        该字段（其 PR #40254 才修复）。这也是本项目不用 langchain-openai
+        而自己扩展客户端的原因之一。
+        """
+        return cls(
+            role="assistant",
+            content=resp.text or "",
+            reasoning_content=resp.reasoning_content,
+            tool_calls=resp.tool_calls,
+        )
+
+    @classmethod
+    def tool_result(cls, tool_call_id: str, content: str) -> "ChatMessage":
+        """构造工具执行结果消息（回传给模型）"""
+        return cls(role="tool", content=content, tool_call_id=tool_call_id)
 
 
 class Conversation:
@@ -181,12 +211,67 @@ class LLMClient:
             json_mode=json_mode,
         )
 
-        # 3. 调用
+        # 3. 委托给 generate_chat（统一调用路径）
+        return await self.generate_chat(
+            messages,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+            thinking_enabled=thinking_enabled,
+            temperature=temperature,
+            json_mode=json_mode,
+        )
+
+    async def generate_chat(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        thinking_enabled: bool | None = None,
+        temperature: float | None = None,
+        json_mode: bool = False,
+        tools: list[dict] | None = None,
+        tool_choice: str | dict | None = None,
+        parallel_tool_calls: bool | None = None,
+    ) -> LLMResponse:
+        """
+        按完整消息列表生成（Agent 循环用）。
+
+        **与 `generate()` 的分工**：
+          `generate(system, user_message, history=...)` 适合"一问一答 + 历史"的形态；
+          但 Agent 循环里的消息流是混杂的 ——
+          system + user + assistant(带 tool_calls) + tool(结果) + assistant(再调工具)...
+          用 system/user 两段式拼不出来，所以需要这个直接传 messages 的入口。
+
+        Args:
+            messages: 完整消息列表（OpenAI 格式 dict）。
+                用 `ChatMessage.to_openai_dict()` 构造，**不要手写 dict** ——
+                手写极易漏掉 assistant 消息的 `reasoning_content`，
+                而 DeepSeek 在带 tools 时要求该字段原样回传，漏了就 HTTP 400。
+            tools: 工具定义列表（OpenAI function calling 格式）
+            tool_choice: "auto" / "none" / "required" / {"type":"function",...}
+            parallel_tool_calls: 是否允许并行工具调用
+
+        Returns:
+            LLMResponse；若模型请求调用工具，`tool_calls` 非空且
+            `finish_reason` 通常为 "tool_calls"
+        """
+        params = self._build_params(
+            messages,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+            thinking_enabled=thinking_enabled,
+            temperature=temperature,
+            json_mode=json_mode,
+            tools=tools,
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+        )
+
         start = time.monotonic()
         resp = await self._client.chat.completions.create(**params)
         elapsed_ms = (time.monotonic() - start) * 1000
 
-        # 4. 解析响应
         return self._parse_response(resp, elapsed_ms)
 
     # ═══════════════════════════════════════════════════════════════
@@ -202,6 +287,9 @@ class LLMClient:
         thinking_enabled: bool | None,
         temperature: float | None = None,
         json_mode: bool = False,
+        tools: list[dict] | None = None,
+        tool_choice: str | dict | None = None,
+        parallel_tool_calls: bool | None = None,
     ) -> dict:
         """组装 OpenAI 调用参数，正确处理 DeepSeek 思考模式"""
         params: dict[str, Any] = {
@@ -228,6 +316,17 @@ class LLMClient:
         if json_mode:
             params["response_format"] = {"type": "json_object"}
 
+        # ── 工具调用（Week13）──
+        # 全部"仅显式传入才加"：不自动填 tool_choice="auto"，
+        # 否则等于改变了所有既有调用的请求形态。
+        # （tools 与 thinking 可共存 —— 已由 scripts/spike_tool_calling.py 实测验证）
+        if tools:
+            params["tools"] = tools
+        if tool_choice is not None:
+            params["tool_choice"] = tool_choice
+        if parallel_tool_calls is not None:
+            params["parallel_tool_calls"] = parallel_tool_calls
+
         return params
 
     # ═══════════════════════════════════════════════════════════════
@@ -244,12 +343,41 @@ class LLMClient:
         reasoning = getattr(message, "reasoning_content", None)
         finish_reason = choice.finish_reason or "stop"
 
+        # ── 工具调用提取（Week13）──
+        # openai 3.0 的对象形态（已实测）：
+        #   ChatCompletionMessageFunctionToolCall
+        #     ├─ id: str
+        #     ├─ type: Literal["function"]
+        #     └─ function: Function{ name: str, arguments: str }   ← arguments 是 JSON 字符串
+        # 转成纯 dict 后再往上传，避免上层依赖 SDK 的内部类型
+        # （SDK 大版本升级时对象结构会变，dict 是稳定契约）。
+        raw_tcs = getattr(message, "tool_calls", None)
+        tool_calls: list[dict] | None = None
+        if raw_tcs:
+            tool_calls = []
+            for tc in raw_tcs:
+                try:
+                    tool_calls.append(tc.model_dump())
+                except AttributeError:
+                    # 退化路径：SDK 对象没有 model_dump（极旧版本或 FutureWarning 包装）
+                    tool_calls.append({
+                        "id": getattr(tc, "id", ""),
+                        "type": getattr(tc, "type", "function"),
+                        "function": {
+                            "name": getattr(getattr(tc, "function", None), "name", ""),
+                            "arguments": getattr(
+                                getattr(tc, "function", None), "arguments", "{}"
+                            ),
+                        },
+                    })
+
         usage = resp.usage
         return LLMResponse(
             text=text,
             reasoning_content=reasoning,
             model=resp.model or self._model,
             finish_reason=finish_reason,
+            tool_calls=tool_calls,
             usage=LLMUsage(
                 prompt_tokens=usage.prompt_tokens or 0,
                 completion_tokens=usage.completion_tokens or 0,

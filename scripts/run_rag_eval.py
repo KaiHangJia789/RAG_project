@@ -31,7 +31,8 @@ from app.embedding.dashscope_embedding import DashscopeEmbeddingClient  # noqa: 
 from app.evaluation.evaluator import QuestionMetrics, RAGEvaluator, summarize  # noqa: E402
 from app.evaluation.judge import JudgeCache, LLMJudge  # noqa: E402
 from app.rag.models import RetrievalConfig  # noqa: E402
-from app.rag.pipeline import RagPipeline  # noqa: E402
+from app.db.connection import Database  # noqa: E402
+from app.evaluation.runners import build_runner  # noqa: E402
 from app.services.index_service import IndexService  # noqa: E402
 
 logging.basicConfig(
@@ -110,10 +111,10 @@ async def run(args) -> None:
         retrieve_k=args.retrieve_k,
         prompt_name=args.prompt,
     )
-    config_name = args.name or f"{args.strategy}_k{args.final_k}_s{args.min_score}"
+    config_name = args.name or f"{args.mode}_{args.strategy}_k{args.final_k}_s{args.min_score}"
 
     result_path = settings.EVAL_DIR / f"result_{config_name}.jsonl"
-    report_path = Path("docs/week10") / f"eval_{config_name}.md"
+    report_path = Path(f"docs/{args.week}") / f"eval_{config_name}.md"
 
     done = load_done(result_path) if args.resume else {}
     if done:
@@ -131,11 +132,20 @@ async def run(args) -> None:
         sys.exit(1)
     logger.info("索引就绪: %d 条向量", index.size)
 
-    pipeline = RagPipeline(index_service=index)
+    # 按模式装配运行器（basic / agent / react）——
+    # 三种模式都产出 RagAnswer，所以下面的评测逻辑完全共用
+    db = None
+    if args.mode in ("react",):
+        db = Database()
+        await db.connect(settings.DATABASE_DSN)
+
+    runner = build_runner(args.mode, index, db=db)
+
     evaluator = RAGEvaluator(
         judge=LLMJudge(cache=JudgeCache(settings.EVAL_DIR / "judge_cache.jsonl"))
     )
 
+    logger.info("模式: %s", runner.describe())
     logger.info("配置: %s", config.describe())
     logger.info("开始评估 %d 题 ...", len(items))
 
@@ -150,7 +160,7 @@ async def run(args) -> None:
             continue
 
         try:
-            result = await pipeline.answer(item["question"], config)
+            result = await runner.run(item["question"], config)
             m = await evaluator.evaluate_one(
                 result,
                 question_id=qid,
@@ -209,6 +219,9 @@ async def run(args) -> None:
             await upload_to_langfuse(metrics_list, config_name, config)
         except Exception as e:
             logger.error("LangFuse 上报失败（本地报告已生成）: %s", e)
+
+    if db is not None:
+        await db.disconnect()
 
 
 async def upload_to_langfuse(
@@ -294,6 +307,9 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=0, help="只跑前 N 题（试水用）")
     p.add_argument("--local", action="store_true", help="不上报 LangFuse")
     p.add_argument("--resume", action="store_true", help="跳过已完成的题")
+    p.add_argument("--week", default="week10", help="报告输出目录（week10/week11/...）")
+    p.add_argument("--mode", default="basic", choices=["basic", "agent", "react"],
+                   help="运行模式：basic=命令式管线，agent=图式编排，react=工具调用")
     args = p.parse_args()
 
     asyncio.run(run(args))

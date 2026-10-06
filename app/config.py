@@ -107,6 +107,14 @@ class Settings(BaseSettings):
     RAG_FINAL_K: int = 5                 # 最终上下文条数
     RAG_MIN_SCORE: float = 0.0           # 相似度阈值；0.0 = 不过滤（保证 demo 可跑通）
 
+    # --- Agent 编排（Week11-13，LangGraph）---
+    AGENT_MAX_REWRITES: int = 2          # 查询重写次数上限（循环图的第一重终止条件）
+    # 相关性阈值：判官的语义评分（0-1），**不是** FAISS 余弦分，别与 RAG_MIN_SCORE 混用
+    AGENT_RELEVANCE_THRESHOLD: float = 0.5
+    AGENT_RECURSION_LIMIT: int = 25      # LangGraph 平台的硬上限（第三重终止条件）
+    AGENT_TOOL_MAX_ROUNDS: int = 4       # 工具调用轮次上限（防 Agent 无限调工具）
+    AGENT_CHECKPOINT_DB: Path = Path("data/agent/checkpoints.sqlite")
+
     # --- 评估（Week10，LLM-as-Judge）---
     EVAL_DIR: Path = Path("data/eval")
     CORPUS_DIR: Path = Path("data/corpus")

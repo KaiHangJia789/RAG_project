@@ -88,17 +88,45 @@ class JudgeCache:
         self._load()
 
     def _load(self) -> None:
+        """
+        逐行加载，**坏行跳过而非整体失败**。
+
+        缓存是追加写的 JSONL，进程被杀或磁盘写满时会留下半行。
+        早期实现用 `read_text()` 整体读取 + 整体 try，一个坏字节就抛
+        UnicodeDecodeError 让整个评测跑不起来 —— 缓存文件不该有这个权力。
+        现在按二进制逐行读、逐行容错，最坏情况只是丢掉少数几条缓存项。
+        """
         if not self.path.exists():
             return
+
+        bad = 0
+        loaded = 0
         try:
-            for line in self.path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                item = json.loads(line)
-                self._mem[item["key"]] = item["value"]
-        except (json.JSONDecodeError, KeyError, OSError) as e:
-            logger.warning("判官缓存加载失败（将从头开始）: %s", e)
+            with open(self.path, "rb") as f:
+                for raw in f:
+                    if not raw.strip():
+                        continue
+                    try:
+                        # 用 replace 容错解码：非法字节替换成 U+FFFD 而不是抛异常。
+                        # 这些行后续的 json.loads 大概率也会失败，一并跳过即可。
+                        line = raw.decode("utf-8", errors="replace")
+                        item = json.loads(line)
+                        self._mem[item["key"]] = item["value"]
+                        loaded += 1
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        bad += 1
+                        continue
+        except OSError as e:
+            logger.warning("判官缓存读取失败（将从头开始）: %s", e)
             self._mem = {}
+            return
+
+        if bad:
+            logger.warning(
+                "判官缓存有 %d 行损坏已跳过（共加载 %d 条）—— "
+                "多半是上次写入时进程被中断，可删除 %s 重建",
+                bad, loaded, self.path,
+            )
 
     @staticmethod
     def make_key(model: str, prompt_name: str, payload: str) -> str:

@@ -28,3 +28,15 @@ chardet>=5.0.0
 # Week 8 LLM + 可观测性
 openai>=1.0.0
 langfuse>=4.0.0
+
+# Week 9-10 补齐（此前一直在用但未声明，换环境会直接崩）
+python-dotenv>=1.0.0
+faiss-cpu>=1.8.0
+numpy>=1.26.0
+
+# Week 11-13 LangGraph Agent 编排
+langgraph==1.2.12
+langgraph-checkpoint-sqlite==3.1.1
+# 注意：不装 langchain-openai —— 我们扩展自己的 LLMClient。
+# 原因：langchain 的 ChatDeepSeek 会丢掉 reasoning_content，
+# 而 DeepSeek 在带 tools 时要求该字段原样回传（否则 HTTP 400）。
