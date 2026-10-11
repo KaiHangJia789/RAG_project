@@ -2,6 +2,7 @@
 from app.agent.tools.base import Tool, ToolRegistry, ToolResult
 from app.agent.tools.calculator import CalculatorTool
 from app.agent.tools.db_query import DbQueryTool, UnsafeSqlError, validate_readonly_sql
+from app.agent.tools.document import GetDocumentTool
 from app.agent.tools.search import (
     LocalCorpusSearch,
     SearchBackend,
@@ -12,6 +13,7 @@ from app.agent.tools.search import (
 __all__ = [
     "CalculatorTool",
     "DbQueryTool",
+    "GetDocumentTool",
     "LocalCorpusSearch",
     "SearchBackend",
     "SearchDocsTool",
@@ -31,6 +33,11 @@ def build_default_registry(index_service=None, db=None, search_backend=None) -> 
 
     按依赖可用性**选择性注册** —— 索引未就绪就不注册检索工具（而不是
     注册一个永远失败的），这样模型不会把轮次浪费在注定失败的工具上。
+
+    **注意：刻意不注册 `GetDocumentTool`。**
+    那个工具是给 MCP Server 与需要通读文档的场景用的；把它加进来会
+    静默改变第 13 周 Agent 的行为（多一个工具 = 多一种决策可能），
+    而第 13 周的 A/B 评测结果已经定稿。MCP 那边用独立的注册表。
 
     Args:
         index_service: 有则注册 search_documents 与 web_search
