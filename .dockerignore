@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+RAG_venv/
+**/node_modules
+**/.next
+uploads/
+data/
+test_docs/
+tests/
+docs/
+scripts/
+**/__pycache__
+.pytest_cache
